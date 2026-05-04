@@ -1,0 +1,202 @@
+Digite seu Cloud Account Name: barataomoveis175
+
+Clique em "Next"
+
+Na tela de senha, clique em "Forgot password?" (Esqueci minha senha)
+
+Siga as instruções que serão enviadas para seu e-mail barataomoveis175@gmail.com
+
+?? PASSO 2: VERIFIQUE SEU E-MAIL
+Após solicitar a redefinição, verifique:
+
+Caixa de entrada do Gmail
+
+Pasta de SPAM (muitas vezes cai lá)
+
+E-mails da Oracle (remetente: @oracle.com)
+
+?? PASSO 3: CRIAR UMA NOVA SENHA
+Se receber o e-mail, crie uma senha nova e forte. Depois tente fazer login novamente.
+
+?? PASSO 4: SE NÃO FUNCIONAR
+Se mesmo após redefinir a senha o erro continuar, responda o chat com:
+
+"Tentei redefinir minha senha, mas continuo recebendo o erro 'Redirect URI parameter is invalid' ao tentar acessar o console. Meu Cloud Account Name é barataomoveis175. Pode verificar se minha conta está ativa ou se há algum bloqueio?"
+
+?? SE VOCÊ JÁ TENTOU REDEFINIR A SENHA E NÃO FUNCIONOU
+Responda o chat com esta mensagem:
+
+"Já tentei redefinir a senha várias vezes, mas o erro persiste. Preciso de ajuda para acessar meu console. Meu email é barataomoveis175@gmail.com e meu Cloud Account Name é barataomoveis175. O erro é 'Redirect URI parameter is invalid'."
+
+? RESUMO DA AÇÃO
+Passo	Ação
+1	Tente redefinir a senha pelo link "Forgot password?"
+2	Verifique seu e-mail (incluindo SPAM)
+3	Se funcionar, faça login
+4	Se não funcionar, responda o chat pedindo ajuda
+Tente redefinir a senha agora e me avise o resultado! ????
+
+Você está na posição 2 da nossa fila. O tempo de espera estimado é de 17 minutos e 31 segundos.
+? VOCÊ ESTÁ NA FILA DO CHAT!
+Ótimo! Você conseguiu iniciar o atendimento. Agora é aguardar o atendente.
+
+?? TEMPO DE ESPERA ESTIMADO: ~17 minutos
+Posição	Tempo estimado
+2	~17 minutos
+?? ENQUANTO ESPERA, DEIXE ESTA MENSAGEM PRONTA
+Quando o atendente entrar, cole esta mensagem:
+
+"Olá, estou com problema de acesso ao Oracle Cloud Console. Quando tento fazer login com meu Cloud Account Name barataomoveis175, aparece o erro 'Redirect URI parameter is invalid'. Já tentei redefinir a senha, mas o erro persiste. Minha conta é Free Tier. Pode verificar se minha conta está ativa ou me ajudar a resolver esse erro de redirecionamento? Meu e-mail é barataomoveis175@gmail.com. Obrigado."
+
+?? O QUE FAZER ENQUANTO ESPERA
+Ação	Motivo
+Deixe a aba aberta	Não feche ou atualize a página
+Mantenha o som ligado	Pode ter um alerta quando o atendente entrar
+Tenha seus dados em mãos	Email, nome da conta (barataomoveis175)
+?? SE O CHAT DESCONECTAR
+Reinicie o chat pelo mesmo link
+
+Tente novamente em outro horário
+
+? ME AVISE QUANDO FALAR COM O ATENDENTE!
+Diga o que ele respondeu e continuamos daí. ????
+
+Bom dia! Meu nome é Abhishek, como posso ajudar?  respodi Olá, estou com problema de acesso ao Oracle Cloud Console. Quando tento fazer login com meu Cloud Account Name baratoomoveis175, aparece o erro 'Redirect URI parâmetro is invalid'. Já tentei redefinir a senha, mas o erro persiste. Minha conta é Free Tier. Posso verificar se minha conta está ativa ou ajudar a resolver esse erro de redirecionamento? Meu e-mail é barataomoveis175@gmail.com. Obrigado.
+? ÓTIMO! VOCÊ CONSEGUIU FALAR COM O ATENDENTE ABHISHEK!
+Agora é aguardar a resposta dele. O atendente provavelmente vai:
+
+Verificar o status da sua conta
+
+Pedir algumas informações para confirmar sua identidade
+
+Tentar resolver o erro de redirecionamento
+
+?? O QUE O ATENDENTE PODE PERGUNTAR
+Possível pergunta	Sua resposta
+Cloud Account Name	barataomoveis175
+E-mail	barataomoveis175@gmail.com
+Qual o erro exato?	"Redirect URI parameter is invalid"
+Já tentou redefinir a senha?	Sim, várias vezes
+Consegue acessar outros sites da Oracle?	Sim, só o console que não
+?? CASO O ATENDENTE DIGA QUE NÃO PODE AJUDAR
+Se ele disser que o suporte Free Tier é limitado, pergunte:
+
+"Entendo. Você poderia pelo menos verificar se minha conta está ativa? Ou me orientar se devo criar uma nova conta?"
+
+?? PRÓXIMO PASSO
+Aguarde a resposta do Abhishek e me avise o que ele disser!
+
+Vou te ajudar a interpretar e responder da melhor forma possível. ????
+
+I see, may I know if you received a WELCOME email, mentioning "Your account is now fully provisioned" with all the Identity details?
+? RESPONDA ASSIM:
+"I received the email to verify my email address and I clicked the confirmation link. But I did NOT receive a 'Welcome' email saying 'Your account is now fully provisioned' with identity details. The only email I got was the verification one."
+
+?? EM PORTUGUÊS (se preferir):
+"Recebi o e-mail para verificar meu endereço de e-mail e cliquei no link de confirmação. Mas NÃO recebi um e-mail de 'Boas-vindas' dizendo 'Sua conta está totalmente provisionada' com os detalhes de identidade. O único e-mail que recebi foi o de verificação."
+
+?? O QUE ISSO SIGNIFICA
+O atendente está perguntando isso porque:
+
+Situação	Significa
+Recebeu o e-mail de boas-vindas	Conta ativa e pronta para uso
+NÃO recebeu (seu caso)	
+If you don't receive a WELCOME email, mentioning "Your account is now fully provisioned" even after 4 hrs then, unfortunately it seems the signup failed, hence you may retry signup.
+?? RESPOSTA DO SUPORTE: O CADASTRO NÃO FOI CONCLUÍDO
+O atendente confirmou: sua conta não foi ativada porque você nunca recebeu o e-mail de boas-vindas ("Your account is now fully provisioned").
+
+Isso significa que, por algum motivo, o processo de criação da conta falhou após a verificação do e-mail.
+
+? SOLUÇÃO: FAZER UM NOVO CADASTRO
+O próprio suporte orienta: "you may retry signup" (você pode tentar o cadastro novamente).
+
+?? COMO FAZER UM NOVO CADASTRO CORRETAMENTE
+1. Use um E-mail Diferente
+Crie uma nova conta de e-mail (recomendo Gmail)
+
+Não reutilize barataomoveis175@gmail.com
+
+2. Use uma Janela Anônima/Privada
+Abra uma janela anônima no navegador (Ctrl+Shift+N no Chrome)
+
+3. Acesse o link correto
+text
+https://signup.cloud.oracle.com
+4. Preencha com ATENÇÃO
+Nome: Use o mesmo nome do cartão de crédito
+
+País: Brasil
+
+Endereço: Exatamente como no cartão
+
+Cartão: Válido (débito ou crédito com limite)
+
+5. Após o cadastro, aguarde o e-mail de boas-vindas
+O e-mail de verificação chega primeiro (clique no link)
+
+O e-mail de boas-vindas ("Your account is fully provisioned") pode levar de 30 minutos a 4 horas
+
+?? DICAS PARA EVITAR FALHAS
+Dica	Motivo
+Use Wi-Fi residencial	Evite VPN ou internet de empresa
+Dados do cartão idênticos	Nome, endereço, CEP devem bater
+NÃO use cartão virtual	Oracle rejeita cartões de uso único
+Aguarde o e-mail de boas-vindas	Só depois dele a conta está pronta
+?? RESUMO
+Situação	O que fazer
+Conta atual	? Falhou (não recebeu e-mail de boas-vindas)
+Próximo passo	? Fazer novo cadastro com e-mail diferente
+?? PRÓXIMO PASSO
+Crie um novo e-mail (Gmail) e faça um novo cadastro no link acima.
+
+Me avise quando conseguir criar a nova conta e receber o e-mail de boas-vindas! ????
+
+This response is AI-generated, for reference only.
+ele;If you don't receive a WELCOME email, mentioning "Your account is now fully provisioned" even after 4 hrs then, unfortunately it seems the signup failed, hence you may retry signup.   
+Be rest assured any deducted amount shall be refunded as they are just Verification Hold. Oracle instantly releases the hold, however, it shall be reflected in your account as per your Bank's rollback policies which is under 3-5 business working days.  
+MOST IMPORTANT :: I would suggest you to use a valid bank issued physical credit card under your own name and billing address because any other payment method like a debit card a prepaid card or a virtual card is NOT eligible. Only a valid bank issued physical Credit card is eligible for the trial signup.  
+I would suggest you to retry again after at least 4 to 6 hours using another device like your smartphone or tablet pc without any vpn or a proxy if possible and use your 4G or 5G network for the same.  And that shall definitely help you register successfully.
+Please again note the important message above regarding the payment method.
+?? RESPOSTA CLARA DO SUPORTE - O QUE VOCÊ PRECISA SABER
+O atendente Abhishek foi muito claro e te deu as instruções exatas. Vou traduzir e organizar para você:
+
+?? RESUMO DA RESPOSTA DO SUPORTE
+Ponto	Explicação
+1. Cadastro falhou	Você NÃO recebeu o e-mail de boas-vindas ? conta não foi ativada
+2. O valor do cartão	A autorização temporária será devolvida em 3-5 dias úteis
+3. Tipo de cartão	? NÃO aceita: cartão de débito, pré-pago ou virtual
+4. Tipo de cartão correto	? SIM aceita: cartão de crédito físico (bancário)
+5. Como tentar novamente	Espere 4-6 horas, use outro dispositivo (celular), rede 4G/5G, sem VPN
+?? PONTO MAIS IMPORTANTE - TIPO DE CARTÃO
+Tipo de Cartão	Funciona?
+Cartão de crédito físico (bancário)	? SIM
+Cartão de débito	? NÃO
+Cartão pré-pago	? NÃO
+Cartão virtual	? NÃO
+?? Se você usou cartão de débito ou virtual, esse é o motivo da falha!
+
+? O QUE VOCÊ PRECISA FAZER
+Passo	Ação
+1	Consiga um cartão de crédito físico (seu nome, banco físico)
+2	Espere 4-6 horas para tentar de novo
+3	Use outro dispositivo (celular, tablet)
+4	Use rede 4G/5G (não use Wi-Fi se possível)
+5	SEM VPN ou proxy
+6	Use um novo e-mail (Gmail de preferência)
+?? NOVO CADASTRO - RESUMO
+Item	O que usar
+E-mail	Novo (ex: seuemailnovo@gmail.com)
+Dispositivo	Celular (rede 4G/5G)
+Cartão	Crédito físico (bancário, no seu nome)
+Endereço	Exatamente como no cartão
+Nome	Como no cartão
+?? PRÓXIMO PASSO
+Arranje um cartão de crédito físico (se não tiver, peça um familiar)
+
+Espere algumas horas (o próprio sistema da Oracle pode bloquear tentativas repetidas)
+
+Faça novo cadastro seguindo as instruções acima
+
+Me avise quando conseguir fazer o novo cadastro! ??????
+
+This response is AI-generated, for reference only.
