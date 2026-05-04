@@ -1,17 +1,14 @@
-﻿import requests
+import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 from datetime import datetime
 import time
 import os
+import threading
 
-# ============================================
-# CONFIGURAÇÕES - Use variáveis de ambiente
-# ============================================
 TELEGRAM_TOKEN = "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_8Ml-iaZl387Y"
 TELEGRAM_CHAT_ID = "5869218072"
 
-# Dados de suportes e topos
 DADOS_GRAFICOS_REAIS = {
     "TGMA3": {"suporte": 31.50, "topo": 40.00, "nome": "Tegma"},
     "ENMT4": {"suporte": 48.00, "topo": 60.00, "nome": "Energisa MT"},
@@ -25,7 +22,7 @@ DADOS_GRAFICOS_REAIS = {
     "AGRO3": {"suporte": 15.00, "topo": 22.00, "nome": "BrasilAgro"},
 }
 
-INTERVALO_VERIFICACAO = 3600  # 1 hora
+INTERVALO_VERIFICACAO = 3600
 
 def enviar_telegram(mensagem):
     try:
@@ -37,7 +34,6 @@ def enviar_telegram(mensagem):
         return False
 
 def buscar_acoes_fundamentus():
-    """Busca TODAS as ações da B3 no Fundamentus"""
     try:
         url = "https://fundamentus.com.br/resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -126,41 +122,23 @@ def verificar_posicao(ticker, preco):
     if ticker in DADOS_GRAFICOS_REAIS:
         dados = DADOS_GRAFICOS_REAIS[ticker]
         suporte = dados["suporte"]
-        topo = dados["topo"]
         
         dist_suporte = ((preco - suporte) / preco) * 100
         
         if dist_suporte <= 3:
-            return "🟢 SUPORTE", dist_suporte, "COMPRAR AGORA"
+            return "SUPORTE", dist_suporte, "COMPRAR AGORA"
         elif dist_suporte <= 8:
-            return "🟡 PRÓXIMO SUPORTE", dist_suporte, "COMPRAR PARCIAL"
+            return "PROXIMO SUPORTE", dist_suporte, "COMPRAR PARCIAL"
         else:
-            return "🟡 MEIO", dist_suporte, "ANALISAR"
+            return "MEIO", dist_suporte, "ANALISAR"
     else:
-        return "❓ N/A", 999, "DADOS INDISPONÍVEIS"
-
-# ============================================
-# Endpoint de Health Check (mantém o app acordado)
-# ============================================
-from flask import Flask
-app = Flask(__name__)
-
-@app.route('/')
-def health():
-    return "B3 Scanner Running!", 200
-
-@app.route('/scan')
-def scan_manual():
-    """Endpoint para acionar scan manualmente"""
-    oportunidades = monitorar_imediato()
-    return f"Scan concluído. {len(oportunidades)} oportunidades encontradas.", 200
+        return "N/A", 999, "DADOS INDISPONIVEIS"
 
 def monitorar_imediato():
-    """Executa um scan e retorna as oportunidades"""
     print(f"[{datetime.now()}] Executando scan...")
     
     df = buscar_acoes_fundamentus()
-    oportunidades = []
+    oportunidades = 0
     
     if df is not None and len(df) > 0:
         top_baratas = df.head(30)
@@ -170,16 +148,16 @@ def monitorar_imediato():
             preco = row['preco']
             posicao, distancia, recomendacao = verificar_posicao(ticker, preco)
             
-            if posicao == "🟢 SUPORTE":
-                oportunidades.append(ticker)
+            if posicao == "SUPORTE":
+                oportunidades += 1
                 msg = f"""🐋 OPORTUNIDADE B3 - {ticker}
 
-💰 Preço: R$ {preco:.2f}
+💰 Preco: R$ {preco:.2f}
 📊 P/L: {row['pl']:.1f}x
 📊 P/VP: {row['pvp']:.2f}x
 📊 DY: {row['dy']:.1f}%
-📍 Distância do Suporte: {distancia:.1f}%
-🎯 Recomendação: {recomendacao}"""
+📍 Distancia do Suporte: {distancia:.1f}%
+🎯 Recomendacao: {recomendacao}"""
                 
                 enviar_telegram(msg)
                 print(f"Alerta enviado: {ticker}")
@@ -187,21 +165,30 @@ def monitorar_imediato():
     return oportunidades
 
 def monitorar_continuo():
-    """Loop infinito de monitoramento"""
     print(f"B3 Scanner Iniciado! Verificando a cada {INTERVALO_VERIFICACAO//60} minutos")
     
     while True:
         try:
-            monitorar_imediato()
+            oportunidades = monitorar_imediato()
+            print(f"Scan concluido. {oportunidades} oportunidades encontradas.")
             time.sleep(INTERVALO_VERIFICACAO)
         except Exception as e:
             print(f"Erro: {e}")
             time.sleep(60)
 
-# ============================================
-# Iniciar servidor web + monitor em background
-# ============================================
-import threading
+from flask import Flask
+app = Flask(__name__)
+
+@app.route('/')
+def health():
+    return "B3 Scanner Running!", 200
+
+@app.route('/scan')
+def scan_manual():
+    oportunidades = monitorar_imediato()
+    return f"Scan concluido. {oportunidades} oportunidades encontradas.", 200
+
+# Inicia o monitoramento automaticamente
 threading.Thread(target=monitorar_continuo, daemon=True).start()
 
 if __name__ == "__main__":
