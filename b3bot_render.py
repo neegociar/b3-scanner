@@ -78,7 +78,7 @@ def buscar_acoes_fundamentus():
                     pl = converte_valor(colunas[3].text)
                     pvp = converte_valor(colunas[4].text)
                     dy = converte_percent(colunas[5].text)
-                    'setor': colunas[6].text[:30] if len(colunas) > 6 else "N/A"  # Teste outros índices
+                    'setor': colunas[6].text[:30] if len(colunas) > 6 else "N/A"
                     
                     if cotacao <= 0 or pl <= 0 or pvp <= 0:
                         continue
