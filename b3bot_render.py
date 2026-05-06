@@ -76,35 +76,19 @@ def buscar_acoes_fundamentus():
                         continue
 
                     cotacao = converte_valor(colunas[1].text)
-                    pl = converte_valor(colunas[3].text)
-                    pvp = converte_valor(colunas[4].text)
-                    dy = converte_percent(colunas[5].text)
+pl = converte_valor(colunas[3].text)
+pvp = converte_valor(colunas[4].text)
+dy = converte_percent(colunas[5].text)
 
-                    if cotacao <= 0 or pl <= 0 or pvp <= 0:
-                        continue
-
-                    if pl < 2 or pl > 30:
-                        continue
-                    if pvp < 0.3 or pvp > 5:
-                        continue
-                    if dy > 20:
-                        continue
-
-                    score = 0
-                    if pl < 10:
-                        score -= 5
-                    elif pl < 15:
-                        score -= 2
-                    if pvp < 1.2:
-                        score -= 4
-                    elif pvp < 1.8:
-                        score -= 2
-                    if dy > 6:
-                        score -= 3
-                    elif dy > 4:
-                        score -= 1
-
-                    'setor': colunas[2].text[:30] if len(colunas) > 2 else "N/A"
+dados.append({
+    'ticker': ticker,
+    'preco': cotacao,
+    'pl': pl,
+    'pvp': pvp,
+    'dy': dy,
+    'score': score,
+    'setor': colunas[2].text[:30] if len(colunas) > 2 else "N/A"
+})
 
                     dados.append({
                         'ticker': ticker,
