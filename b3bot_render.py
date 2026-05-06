@@ -104,7 +104,7 @@ def buscar_acoes_fundamentus():
                     elif dy > 4:
                         score -= 1
 
-                    setor = colunas[2].text[:30] if len(colunas) > 2 else "N/A"
+                    'setor': colunas[2].text[:30] if len(colunas) > 2 else "N/A"
 
                     dados.append({
                         'ticker': ticker,
