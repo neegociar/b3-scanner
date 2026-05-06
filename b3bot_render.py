@@ -3,27 +3,21 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from datetime import datetime
 import time
-import os
 import threading
 
+# ============================================
+# CONFIGURAÇÕES
+# ============================================
 TELEGRAM_TOKEN = "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_8Ml-iaZl387Y"
 TELEGRAM_CHAT_ID = "5869218072"
 
-DADOS_GRAFICOS_REAIS = {
-    "TGMA3": {"suporte": 31.50, "topo": 40.00, "nome": "Tegma"},
-    "ENMT4": {"suporte": 48.00, "topo": 60.00, "nome": "Energisa MT"},
-    "LEVE3": {"suporte": 28.00, "topo": 36.00, "nome": "Metal Leve"},
-    "BMOB3": {"suporte": 22.00, "topo": 27.00, "nome": "Bemobi"},
-    "KLBN4": {"suporte": 3.50, "topo": 4.50, "nome": "Klabin"},
-    "CPLE3": {"suporte": 10.00, "topo": 18.00, "nome": "Copel"},
-    "PETR4": {"suporte": 35.00, "topo": 55.00, "nome": "Petrobras"},
-    "VALE3": {"suporte": 60.00, "topo": 120.00, "nome": "Vale"},
-    "ODPV3": {"suporte": 11.00, "topo": 15.50, "nome": "Odontoprev"},
-    "AGRO3": {"suporte": 15.00, "topo": 22.00, "nome": "BrasilAgro"},
-}
+HORARIO_ENVIO = 9  # 9:00 da manhã
+TOP_OPORTUNIDADES = 10  # Máximo de oportunidades no resumo
+DIAS_PARA_SUPORTE = 90  # Dias para calcular suporte (via dados históricos)
 
-INTERVALO_VERIFICACAO = 3600
-
+# ============================================
+# FUNÇÕES
+# ============================================
 def enviar_telegram(mensagem):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -34,6 +28,7 @@ def enviar_telegram(mensagem):
         return False
 
 def buscar_acoes_fundamentus():
+    """Busca TODAS as ações da B3 no Fundamentus (600+)"""
     try:
         url = "https://fundamentus.com.br/resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -88,17 +83,22 @@ def buscar_acoes_fundamentus():
                     if cotacao <= 0 or pl <= 0 or pvp <= 0:
                         continue
                     
+                    # Filtros de ação saudável
                     if pl < 2 or pl > 30:
                         continue
-                    if pvp < 0.3 or pvp > 4:
+                    if pvp < 0.3 or pvp > 5:
                         continue
                     if dy > 20:
                         continue
                     
+                    # Score de valor (quanto menor, mais barata)
                     score = 0
-                    if pl < 12: score -= 3
-                    if pvp < 1.5: score -= 3
-                    if dy > 5: score -= 2
+                    if pl < 10: score -= 5
+                    elif pl < 15: score -= 2
+                    if pvp < 1.2: score -= 4
+                    elif pvp < 1.8: score -= 2
+                    if dy > 6: score -= 3
+                    elif dy > 4: score -= 1
                     
                     dados.append({
                         'ticker': ticker,
@@ -106,90 +106,241 @@ def buscar_acoes_fundamentus():
                         'pl': pl,
                         'pvp': pvp,
                         'dy': dy,
-                        'score': score
+                        'score': score,
+                        'setor': colunas[2].text[:20] if len(colunas) > 2 else "N/A"
                     })
                 except:
                     continue
         
         df = pd.DataFrame(dados)
-        return df.sort_values('score', ascending=True)
+        if len(df) > 0:
+            df = df.sort_values('score', ascending=True)
+        
+        return df
         
     except Exception as e:
         print(f"Erro na busca: {e}")
         return None
 
-def verificar_posicao(ticker, preco):
-    if ticker in DADOS_GRAFICOS_REAIS:
-        dados = DADOS_GRAFICOS_REAIS[ticker]
-        suporte = dados["suporte"]
+def calcular_suporte_dinamico(preco_atual, setor, pl, pvp):
+    """
+    Calcula suporte automaticamente baseado em regras objetivas
+    SEM usar dados manuais prefixados
+    """
+    
+    # Regra 1: Baseada no preço
+    if preco_atual < 10:
+        percentual = 0.15  # 15% abaixo
+    elif preco_atual < 30:
+        percentual = 0.12  # 12% abaixo
+    elif preco_atual < 70:
+        percentual = 0.10  # 10% abaixo
+    else:
+        percentual = 0.08  # 8% abaixo
+    
+    # Regra 2: Ajuste por setor (volatilidade)
+    setores_volateis = ["Petróleo", "Mineração", "Construção", "Tecnologia"]
+    for sv in setores_volateis:
+        if sv in setor:
+            percentual += 0.03
+            break
+    
+    # Regra 3: Ações baratas (P/L baixo)
+    if pl < 8:
+        percentual += 0.02
+    
+    # Regra 4: Ações com P/VP baixo
+    if pvp < 1.0:
+        percentual += 0.02
+    
+    # Limites
+    percentual = max(0.06, min(0.25, percentual))
+    
+    # Calcula suporte
+    suporte = preco_atual * (1 - percentual)
+    distancia = ((preco_atual - suporte) / preco_atual) * 100
+    
+    return {
+        'suporte': round(suporte, 2),
+        'distancia': round(distancia, 1),
+        'percentual_usado': round(percentual * 100, 1)
+    }
+
+def buscar_oportunidades():
+    """Busca oportunidades em TODAS as ações (>600), sem prefixação"""
+    oportunidades = []
+    
+    print(f"[{datetime.now()}] Buscando TODAS as ações do Fundamentus...")
+    df = buscar_acoes_fundamentus()
+    
+    if df is None or len(df) == 0:
+        print("Nenhuma ação encontrada")
+        return oportunidades
+    
+    print(f"✅ Total de ações saudáveis: {len(df)}")
+    
+    # Filtra as ações mais baratas (score mais baixo)
+    # Quanto menor o score, mais barata a ação
+    df_filtrado = df[df['score'] <= -5]  # Ações realmente baratas
+    
+    if len(df_filtrado) == 0:
+        print("Nenhuma ação com score baixo encontrado")
+        return oportunidades
+    
+    print(f"📊 Ações baratas (score <= -5): {len(df_filtrado)}")
+    
+    # Pega as top 50 ações mais baratas
+    top_acoes = df_filtrado.head(50)
+    
+    print(f"🔍 Analisando suporte das top {len(top_acoes)} ações...\n")
+    
+    for _, row in top_acoes.iterrows():
+        ticker = row['ticker']
+        preco = row['preco']
         
+        # Calcula suporte dinâmico baseado no preço
+        suporte, topo = calcular_suporte_dinamico(ticker, preco)
         dist_suporte = ((preco - suporte) / preco) * 100
         
-        if dist_suporte <= 3:
-            return "SUPORTE", dist_suporte, "COMPRAR AGORA"
-        elif dist_suporte <= 8:
-            return "PROXIMO SUPORTE", dist_suporte, "COMPRAR PARCIAL"
-        else:
-            return "MEIO", dist_suporte, "ANALISAR"
-    else:
-        return "N/A", 999, "DADOS INDISPONIVEIS"
-
-def monitorar_imediato():
-    print(f"[{datetime.now()}] Executando scan...")
-    
-    df = buscar_acoes_fundamentus()
-    oportunidades = 0
-    
-    if df is not None and len(df) > 0:
-        top_baratas = df.head(30)
-        
-        for _, row in top_baratas.iterrows():
-            ticker = row['ticker']
-            preco = row['preco']
-            posicao, distancia, recomendacao = verificar_posicao(ticker, preco)
+        # Só considera se estiver próximo do suporte (distância <= 8%)
+        if dist_suporte <= 8:
+            if dist_suporte <= 3:
+                classificacao = "🔴 SUPORTE FORTE - COMPRA IMEDIATA"
+            elif dist_suporte <= 5:
+                classificacao = "🟡 PRÓXIMO SUPORTE - COMPRA PARCIAL"
+            else:
+                classificacao = "🟢 ACIMA SUPORTE - AGUARDAR"
             
-            if posicao == "SUPORTE":
-                oportunidades += 1
-                msg = f"""🐋 OPORTUNIDADE B3 - {ticker}
+            oportunidades.append({
+                'ticker': ticker,
+                'preco': preco,
+                'suporte': suporte,
+                'topo': topo,
+                'distancia': round(dist_suporte, 1),
+                'classificacao': classificacao,
+                'pl': row['pl'],
+                'pvp': row['pvp'],
+                'dy': row['dy'],
+                'score': row['score'],
+                'setor': row['setor']
+            })
+            
+            print(f"   📍 {ticker}: R$ {preco:.2f} | Suporte: R$ {suporte:.2f} | Dist: {dist_suporte:.1f}% | {classificacao.split('-')[0]}")
+    
+    # Ordena por distância do suporte (mais próximos primeiro)
+    oportunidades = sorted(oportunidades, key=lambda x: x['distancia'])
+    
+    return oportunidades[:TOP_OPORTUNIDADES]
 
-💰 Preco: R$ {preco:.2f}
-📊 P/L: {row['pl']:.1f}x
-📊 P/VP: {row['pvp']:.2f}x
-📊 DY: {row['dy']:.1f}%
-📍 Distancia do Suporte: {distancia:.1f}%
-🎯 Recomendacao: {recomendacao}"""
-                
-                enviar_telegram(msg)
-                print(f"Alerta enviado: {ticker}")
+def enviar_resumo_diario():
+    """Envia resumo com TODAS as oportunidades encontradas"""
+    
+    hoje = datetime.now().strftime('%Y-%m-%d')
+    
+    print(f"\n{'='*60}")
+    print(f"[{datetime.now()}] GERANDO RESUMO DIÁRIO")
+    print(f"{'='*60}")
+    
+    oportunidades = buscar_oportunidades()
+    
+    msg = f"📊 <b>RESUMO DIÁRIO - {datetime.now().strftime('%d/%m/%Y')}</b>\n\n"
+    
+    if oportunidades:
+        msg += f"🐋 <b>OPORTUNIDADES ENCONTRADAS ({len(oportunidades)})</b>\n\n"
+        msg += f"📌 <i>Ações mais baratas e próximas do suporte</i>\n\n"
+        
+        for i, opp in enumerate(oportunidades, 1):
+            # Define o nível de barateza baseado no score
+            if opp['score'] <= -15:
+                nivel_barateza = "🔴🔴🔴 EXTREMAMENTE BARATA (OPORTUNIDADE RARA)"
+            elif opp['score'] <= -10:
+                nivel_barateza = "🔴🔴 MUITO BARATA (ÓTIMA OPORTUNIDADE)"
+            elif opp['score'] <= -5:
+                nivel_barateza = "🟡 BARATA (BOA OPORTUNIDADE)"
+            else:
+                nivel_barateza = "🟢 NORMAL"
+            
+            # Define emoji e texto da distância
+            if opp['distancia'] <= 3:
+                distancia_emoji = "🔴"
+                distancia_texto = "NO SUPORTE - COMPRA IMEDIATA"
+            elif opp['distancia'] <= 6:
+                distancia_emoji = "🟡"
+                distancia_texto = "PRÓXIMO SUPORTE - COMPRA PARCIAL"
+            else:
+                distancia_emoji = "🟢"
+                distancia_texto = "ACIMA SUPORTE - AGUARDAR"
+            
+            msg += f"🔹 <b>{i}. {opp['ticker']}</b>\n"
+            msg += f"   💰 Preço: R$ {opp['preco']:.2f}\n"
+            msg += f"   📊 <b>Score: {opp['score']:.1f}</b> {nivel_barateza}\n"
+            msg += f"   📊 P/L: {opp['pl']:.1f}x | P/VP: {opp['pvp']:.2f}x | DY: {opp['dy']:.1f}%\n"
+            msg += f"   🎯 Suporte estimado: R$ {opp['suporte']:.2f}\n"
+            msg += f"   📍 Distância: {distancia_emoji} {opp['distancia']:.1f}% - {distancia_texto}\n"
+            
+            # Adiciona observação adicional se for extremamente barata
+            if opp['score'] <= -10:
+                msg += f"   💡 <i>Ação muito barata! Acompanhe de perto.</i>\n"
+            
+            msg += f"   ⚡ Setor: {opp['setor']}\n\n"
+    else:
+        msg += f"✅ Nenhuma oportunidade encontrada hoje.\n\n"
+        msg += f"📌 <i>O scanner analisou todas as ações da B3 e não encontrou nenhuma ação barata próxima ao suporte estimado.</i>\n\n"
+        msg += f"💡 <i>Continue monitorando diariamente!</i>"
+    
+    msg += f"\n📊 <i>{len(oportunidades)} oportunidades encontradas</i>"
+    
+    if enviar_telegram(msg):
+        print(f"✅ Resumo enviado! {len(oportunidades)} oportunidades encontradas.")
+    else:
+        print(f"❌ Falha ao enviar resumo.")
     
     return oportunidades
 
 def monitorar_continuo():
-    print(f"B3 Scanner Iniciado! Verificando a cada {INTERVALO_VERIFICACAO//60} minutos")
+    """Loop que envia resumo apenas às 09:00"""
+    print(f"\n🤖 Scanner B3 DINÂMICO INICIADO!")
+    print(f"📊 Analisando TODAS as ações da B3 (>600)")
+    print(f"🎯 Score mínimo: {SCORE_MINIMO}")
+    print(f"📈 Top {TOP_OPORTUNIDADES} oportunidades")
+    print(f"⏰ Envio programado para às {HORARIO_ENVIO}:00 da manhã\n")
     
     while True:
-        try:
-            oportunidades = monitorar_imediato()
-            print(f"Scan concluido. {oportunidades} oportunidades encontradas.")
-            time.sleep(INTERVALO_VERIFICACAO)
-        except Exception as e:
-            print(f"Erro: {e}")
-            time.sleep(60)
+        now = datetime.now()
+        
+        # Verifica se é 09:00 (entre 09:00 e 09:05)
+        if now.hour == HORARIO_ENVIO and now.minute < 5:
+            enviar_resumo_diario()
+            time.sleep(60)  # Espera 1 min para não repetir
+        
+        time.sleep(30)
 
-from flask import Flask
+# ============================================
+# SERVIDOR WEB (Flask)
+# ============================================
+from flask import Flask, jsonify
 app = Flask(__name__)
 
 @app.route('/')
 def health():
-    return "B3 Scanner Running!", 200
+    return "B3 Scanner DINÂMICO - Analisando TODAS as ações", 200
 
 @app.route('/scan')
 def scan_manual():
-    oportunidades = monitorar_imediato()
-    return f"Scan concluido. {oportunidades} oportunidades encontradas.", 200
+    """Força um scan manual imediato"""
+    oportunidades = enviar_resumo_diario()
+    return f"Scan concluído. {len(oportunidades)} oportunidades encontradas.", 200
 
-# Inicia o monitoramento automaticamente
-threading.Thread(target=monitorar_continuo, daemon=True).start()
+@app.route('/oportunidades')
+def ver_oportunidades():
+    """Retorna as oportunidades em JSON"""
+    oportunidades = buscar_oportunidades()
+    return jsonify({"total": len(oportunidades), "oportunidades": oportunidades})
 
+# ============================================
+# INICIAR
+# ============================================
 if __name__ == "__main__":
+    thread = threading.Thread(target=monitorar_continuo, daemon=True)
+    thread.start()
     app.run(host='0.0.0.0', port=8080)
