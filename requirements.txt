@@ -4,17 +4,3 @@ pandas
 flask
 gunicorn
 pytz
-
-import pytz
-
-def monitorar_continuo():
-    fuso_sp = pytz.timezone('America/Sao_Paulo')
-    
-    while True:
-        now = datetime.now(fuso_sp)
-        
-        if now.hour == 9 and now.minute < 5:
-            enviar_resumo_diario()
-            time.sleep(60)
-        
-        time.sleep(30)
