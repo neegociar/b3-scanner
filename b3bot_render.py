@@ -107,7 +107,7 @@ def buscar_acoes_fundamentus():
                         'pvp': pvp,
                         'dy': dy,
                         'score': score,
-                        'setor': colunas[2].text[:20] if len(colunas) > 2 else "N/A"
+                        'setor': colunas[2].text[:30] if len(colunas) > 2 else "N/A"
                     })
                 except:
                     continue
@@ -122,26 +122,19 @@ def buscar_acoes_fundamentus():
         print(f"Erro na busca: {e}")
         return None
 
-def calcular_suporte_dinamico(ticker, preco_atual):
-    """
-    Calcula suporte baseado no preço atual e setor
-    Quanto mais volátil o setor, maior a variação para suporte
-    """
-    # Suporte estimado entre 8% e 20% abaixo do preço atual
-    # Quanto mais caro o ativo, maior a distância do suporte
-    if preco_atual > 100:
-        percentual = 0.12  # 12% abaixo
-    elif preco_atual > 50:
-        percentual = 0.10  # 10% abaixo
-    elif preco_atual > 10:
-        percentual = 0.08  # 8% abaixo
+def calcular_suporte_dinamico(preco_atual):
+    """Calcula suporte com percentual variável baseado no preço"""
+    if preco_atual < 10:
+        percentual = 0.15  # 15% abaixo (ações muito baratas)
+    elif preco_atual < 30:
+        percentual = 0.12  # 12% abaixo (ações baratas)
+    elif preco_atual < 70:
+        percentual = 0.10  # 10% abaixo (ações médias)
     else:
-        percentual = 0.15  # 15% abaixo para ações baratas
+        percentual = 0.08  # 8% abaixo (ações caras)
     
     suporte = preco_atual * (1 - percentual)
-    topo = preco_atual * (1 + percentual)
-    
-    return round(suporte, 2), round(topo, 2)
+    return round(suporte, 2)
 
 def buscar_oportunidades():
     """Busca oportunidades em TODAS as ações (>600), sem prefixação"""
