@@ -237,17 +237,23 @@ def enviar_resumo_diario():
     return oportunidades
 
 def monitorar_continuo():
-    """Loop que envia resumo apenas às 09:00"""
+    """Loop que envia resumo às 09:00 (horário de Brasília)"""
+    import pytz
+    fuso_sp = pytz.timezone('America/Sao_Paulo')
+    
     print(f"\n🤖 SCANNER B3 INICIADO")
-    print(f"⏰ Envio às {HORARIO_ENVIO}:00\n")
+    print(f"⏰ Envio programado para às 09:00 (horário de Brasília)\n")
     
     while True:
-        now = datetime.now()
-        if now.hour == HORARIO_ENVIO and now.minute < 5:
+        now = datetime.now(fuso_sp)
+        
+        # Verifica se é 09:00 (entre 09:00 e 09:05)
+        if now.hour == 9 and now.minute < 5:
+            print(f"[{now}] Executando envio programado...")
             enviar_resumo_diario()
-            time.sleep(60)
+            time.sleep(60)  # Espera 1 min para não repetir
+        
         time.sleep(30)
-
 # ============================================
 # SERVIDOR WEB
 # ============================================
