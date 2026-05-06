@@ -121,15 +121,15 @@ def buscar_acoes_fundamentus():
         return None
 
 def calcular_suporte_dinamico(preco_atual):
-    """Calcula suporte baseado no preço atual"""
-    if preco_atual > 100:
-        percentual = 0.12
-    elif preco_atual > 50:
-        percentual = 0.10
-    elif preco_atual > 10:
-        percentual = 0.08
+    """Calcula suporte com percentual variável baseado no preço"""
+    if preco_atual < 10:
+        percentual = 0.15  # 15% abaixo (ações muito baratas)
+    elif preco_atual < 30:
+        percentual = 0.12  # 12% abaixo (ações baratas)
+    elif preco_atual < 70:
+        percentual = 0.10  # 10% abaixo (ações médias)
     else:
-        percentual = 0.15
+        percentual = 0.08  # 8% abaixo (ações caras)
     
     suporte = preco_atual * (1 - percentual)
     return round(suporte, 2)
