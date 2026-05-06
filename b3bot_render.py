@@ -107,7 +107,7 @@ def buscar_acoes_fundamentus():
                         'pvp': pvp,
                         'dy': dy,
                         'score': score,
-                        'setor': colunas[2].text[:30] if len(colunas) > 2 else "N/A"
+                        'setor': colunas[2].text[:20] if len(colunas) > 2 else "N/A"
                     })
                 except:
                     continue
@@ -122,19 +122,26 @@ def buscar_acoes_fundamentus():
         print(f"Erro na busca: {e}")
         return None
 
-def calcular_suporte_dinamico(preco_atual):
-    """Calcula suporte com percentual variável baseado no preço"""
-    if preco_atual < 10:
-        percentual = 0.15  # 15% abaixo (ações muito baratas)
-    elif preco_atual < 30:
-        percentual = 0.12  # 12% abaixo (ações baratas)
-    elif preco_atual < 70:
-        percentual = 0.10  # 10% abaixo (ações médias)
+def calcular_suporte_dinamico(ticker, preco_atual):
+    """
+    Calcula suporte baseado no preço atual e setor
+    Quanto mais volátil o setor, maior a variação para suporte
+    """
+    # Suporte estimado entre 8% e 20% abaixo do preço atual
+    # Quanto mais caro o ativo, maior a distância do suporte
+    if preco_atual > 100:
+        percentual = 0.12  # 12% abaixo
+    elif preco_atual > 50:
+        percentual = 0.10  # 10% abaixo
+    elif preco_atual > 10:
+        percentual = 0.08  # 8% abaixo
     else:
-        percentual = 0.08  # 8% abaixo (ações caras)
+        percentual = 0.15  # 15% abaixo para ações baratas
     
     suporte = preco_atual * (1 - percentual)
-    return round(suporte, 2)
+    topo = preco_atual * (1 + percentual)
+    
+    return round(suporte, 2), round(topo, 2)
 
 def buscar_oportunidades():
     """Busca oportunidades em TODAS as ações (>600), sem prefixação"""
@@ -264,21 +271,21 @@ def enviar_resumo_diario():
     
     return oportunidades
 
+import pytz  # ← Isso fica no código Python, não no requirements.txt
+from datetime import datetime
+import time
+import threading
+# ... resto das importações ...
+
 def monitorar_continuo():
-    """Loop que envia resumo apenas às 09:00"""
-    print(f"\n🤖 Scanner B3 DINÂMICO INICIADO!")
-    print(f"📊 Analisando TODAS as ações da B3 (>600)")
-    print(f"🎯 Score mínimo: {SCORE_MINIMO}")
-    print(f"📈 Top {TOP_OPORTUNIDADES} oportunidades")
-    print(f"⏰ Envio programado para às {HORARIO_ENVIO}:00 da manhã\n")
+    fuso_sp = pytz.timezone('America/Sao_Paulo')
     
     while True:
-        now = datetime.now()
+        now = datetime.now(fuso_sp)
         
-        # Verifica se é 09:00 (entre 09:00 e 09:05)
-        if now.hour == HORARIO_ENVIO and now.minute < 5:
+        if now.hour == 9 and now.minute < 5:
             enviar_resumo_diario()
-            time.sleep(60)  # Espera 1 min para não repetir
+            time.sleep(60)
         
         time.sleep(30)
 
