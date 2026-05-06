@@ -74,11 +74,20 @@ def buscar_acoes_fundamentus():
                     if not ticker[-1].isdigit():
                         continue
                     
-                    cotacao = converte_valor(colunas[1].text)
-                    pl = converte_valor(colunas[3].text)
-                    pvp = converte_valor(colunas[4].text)
-                    dy = converte_percent(colunas[5].text)
-                    'setor': colunas[6].text[:30] if len(colunas) > 6 else "N/A"
+                   cotacao = converte_valor(colunas[1].text)
+pl = converte_valor(colunas[3].text)
+pvp = converte_valor(colunas[4].text)
+dy = converte_percent(colunas[5].text)
+
+dados.append({
+    'ticker': ticker,
+    'preco': cotacao,
+    'pl': pl,
+    'pvp': pvp,
+    'dy': dy,
+    'score': score,
+    'setor': (colunas[2].text[:30] if len(colunas) > 2 else "N/A")
+})
                     
                     if cotacao <= 0 or pl <= 0 or pvp <= 0:
                         continue
