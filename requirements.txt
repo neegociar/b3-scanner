@@ -4,3 +4,4 @@ pandas
 flask
 gunicorn
 pytz
+yfinance
