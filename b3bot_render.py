@@ -44,7 +44,7 @@ def buscar_acoes_fundamentus():
         linhas = tabela.find_all('tr')[1:]
         
         def converte_valor(texto):
-            if not texto or texto == '-':
+            if not texto or texto == '-' or texto == '':
                 return 0
             texto = texto.replace('R$', '').replace('.', '').replace(',', '.').strip()
             try:
@@ -53,7 +53,7 @@ def buscar_acoes_fundamentus():
                 return 0
         
         def converte_percent(texto):
-            if not texto or texto == '-':
+            if not texto or texto == '-' or texto == '':
                 return 0
             texto = texto.replace('%', '').replace('.', '').replace(',', '.').strip()
             try:
@@ -67,19 +67,22 @@ def buscar_acoes_fundamentus():
                 try:
                     ticker = colunas[0].text.strip()
                     
-                    if not ticker[0].isalpha():
+                    if not ticker or len(ticker) < 4:
                         continue
-                    if len(ticker) < 4 or len(ticker) > 6:
+                    if not ticker[0].isalpha():
                         continue
                     if not ticker[-1].isdigit():
                         continue
                     
                     cotacao = converte_valor(colunas[1].text)
+                    if cotacao <= 0:
+                        continue
+                    
                     pl = converte_valor(colunas[3].text)
                     pvp = converte_valor(colunas[4].text)
                     dy = converte_percent(colunas[5].text)
                     
-                    if cotacao <= 0 or pl <= 0 or pvp <= 0:
+                    if pl <= 0 or pvp <= 0:
                         continue
                     
                     if pl < 2 or pl > 30:
@@ -103,8 +106,30 @@ def buscar_acoes_fundamentus():
                     elif dy > 4:
                         score -= 1
                     
-                    # CORREÇÃO 1: Índice correto do setor (colunas[2])
-                    setor_texto = colunas[2].text.strip()[:30] if len(colunas) > 2 else "N/A"
+                    # Tenta pegar setor do Fundamentus (se disponível)
+                    setor_fundamentus = ""
+                    if len(colunas) > 2 and colunas[2].text.strip() and colunas[2].text.strip() != '0,00':
+                        setor_fundamentus = colunas[2].text.strip()[:30]
+                    elif len(colunas) > 3 and colunas[3].text.strip() and colunas[3].text.strip() != '0,00':
+                        setor_fundamentus = colunas[3].text.strip()[:30]
+                    
+                    # Se não achou no Fundamentus, busca no Yahoo Finance (apenas para ações com score bom)
+                    setor_texto = setor_fundamentus
+                    if (not setor_texto or setor_texto == 'N/A') and score <= -5:
+                        try:
+                            import yfinance as yf
+                            ticker_yf = f"{ticker}.SA"
+                            stock = yf.Ticker(ticker_yf)
+                            info = stock.info
+                            setor_yahoo = info.get('sector', '')
+                            if setor_yahoo:
+                                setor_texto = setor_yahoo[:30]
+                            else:
+                                setor_texto = "N/A"
+                        except:
+                            setor_texto = "N/A"
+                    elif not setor_texto:
+                        setor_texto = "N/A"
                     
                     dados.append({
                         'ticker': ticker,
@@ -130,15 +155,15 @@ def buscar_acoes_fundamentus():
 def calcular_suporte_dinamico(preco_atual):
     """Calcula suporte com percentual variável baseado no preço"""
     if preco_atual < 10:
-        percentual = 0.15      # 15% abaixo
+        percentual = 0.15
     elif preco_atual < 30:
-        percentual = 0.12      # 12% abaixo
+        percentual = 0.12
     elif preco_atual < 50:
-        percentual = 0.11      # 11% abaixo
+        percentual = 0.11
     elif preco_atual < 100:
-        percentual = 0.10      # 10% abaixo
+        percentual = 0.10
     else:
-        percentual = 0.08      # 8% abaixo
+        percentual = 0.08
     
     suporte = preco_atual * (1 - percentual)
     return round(suporte, 2), percentual
@@ -163,15 +188,10 @@ def buscar_oportunidades():
     
     top_acoes = df_filtrado.head(50)
     
-    print(f"🔍 Analisando suporte...\n")
-    
     for _, row in top_acoes.iterrows():
         preco = row['preco']
         suporte, percentual = calcular_suporte_dinamico(preco)
         dist_suporte = ((preco - suporte) / preco) * 100
-        
-        # DEBUG para verificar no log do Render
-        print(f"   {row['ticker']}: R$ {preco:.2f} | {percentual:.0%} abaixo | Suporte R$ {suporte:.2f} | Dist {dist_suporte:.1f}%")
         
         if dist_suporte <= 15:
             if dist_suporte <= 3:
@@ -188,7 +208,6 @@ def buscar_oportunidades():
                 'preco': preco,
                 'suporte': suporte,
                 'distancia': round(dist_suporte, 1),
-                'percentual': round(percentual * 100, 0),
                 'classificacao': classificacao,
                 'pl': row['pl'],
                 'pvp': row['pvp'],
@@ -239,7 +258,10 @@ def enviar_resumo_diario():
             msg += f"📍 Distância: {opp['distancia']:.1f}% - {dist_texto}\n"
             if opp['score'] <= -10:
                 msg += f"💡 Ação muito barata! Acompanhe de perto.\n"
-            msg += f"⚡ Setor: {opp['setor']}\n\n"
+            # msg += f"⚡ Setor: {opp['setor']}\n\n"  ← REMOVIDA
+            msg += "\n"  # Linha em branco
+        
+        msg += f"📌 <i>Top {len(oportunidades)} ações mais baratas</i>"
     else:
         msg += f"✅ Nenhuma oportunidade encontrada hoje."
     
