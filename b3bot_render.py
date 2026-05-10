@@ -62,86 +62,83 @@ def buscar_acoes_fundamentus():
                 return 0
         
         for linha in linhas:
-            colunas = linha.find_all('td')
-            if len(colunas) >= 10:
-                try:
-                    ticker = colunas[0].text.strip()
-                    
-                    if not ticker or len(ticker) < 4:
-                        continue
-                    if not ticker[0].isalpha():
-                        continue
-                    if not ticker[-1].isdigit():
-                        continue
-                    
-                    cotacao = converte_valor(colunas[1].text)
-                    if cotacao <= 0:
-                        continue
-                    
-                    pl = converte_valor(colunas[3].text)
-                    pvp = converte_valor(colunas[4].text)
-                    dy = converte_percent(colunas[5].text)
-                    
-                    if pl <= 0 or pvp <= 0:
-                        continue
-                    
-                    if pl < 2 or pl > 30:
-                        continue
-                    if pvp < 0.3 or pvp > 5:
-                        continue
-                    if dy > 20:
-                        continue
-                    
-                    score = 0
-                    if pl < 10:
-                        score -= 5
-                    elif pl < 15:
-                        score -= 2
-                    if pvp < 1.2:
-                        score -= 4
-                    elif pvp < 1.8:
-                        score -= 2
-                    if dy > 6:
-                        score -= 3
-                    elif dy > 4:
-                        score -= 1
-                    
-                    # Tenta pegar setor do Fundamentus (se disponível)
-                    setor_fundamentus = ""
-                    if len(colunas) > 2 and colunas[2].text.strip() and colunas[2].text.strip() != '0,00':
-                        setor_fundamentus = colunas[2].text.strip()[:30]
-                    elif len(colunas) > 3 and colunas[3].text.strip() and colunas[3].text.strip() != '0,00':
-                        setor_fundamentus = colunas[3].text.strip()[:30]
-                    
-                    # Se não achou no Fundamentus, busca no Yahoo Finance (apenas para ações com score bom)
-                    setor_texto = setor_fundamentus
-                    if (not setor_texto or setor_texto == 'N/A') and score <= -5:
-                        try:
-                            import yfinance as yf
-                            ticker_yf = f"{ticker}.SA"
-                            stock = yf.Ticker(ticker_yf)
-                            info = stock.info
-                            setor_yahoo = info.get('sector', '')
-                            if setor_yahoo:
-                                setor_texto = setor_yahoo[:30]
-                            else:
-                                setor_texto = "N/A"
-                        except:
-                            setor_texto = "N/A"
-                    elif not setor_texto:
-                        setor_texto = "N/A"
-                    
-                    dados.append({
-                        'ticker': ticker,
-                        'preco': cotacao,
-                        'pl': pl,
-                        'pvp': pvp,
-                        'dy': dy,
-                        'score': score,
-                        'setor': setor_texto
-                    })
-                except:
-                    continue
+    colunas = linha.find_all('td')
+    if len(colunas) >= 10:
+        try:
+            ticker = colunas[0].text.strip()
+            
+            if not ticker or len(ticker) < 4:
+                continue
+            if not ticker[0].isalpha():
+                continue
+            if not ticker[-1].isdigit():
+                continue
+            
+            cotacao = converte_valor(colunas[1].text)
+            
+            # ============================================
+            # FILTRO DE ATIVOS "MORTOS" (SEM LIQUIDEZ)
+            # ============================================
+            if cotacao <= 0:
+                continue  # Pula ações com preço zerado
+            
+            pl = converte_valor(colunas[3].text)
+            pvp = converte_valor(colunas[4].text)
+            dy = converte_percent(colunas[5].text)
+            
+            if pl <= 0 or pvp <= 0:
+                continue  # Pula ações sem indicadores
+            
+            # Verifica volume (se disponível)
+            if len(colunas) > 6:
+                volume_texto = colunas[6].text.strip()
+                if volume_texto and volume_texto != '-':
+                    try:
+                        volume = converte_valor(volume_texto)
+                        if volume <= 0:
+                            continue  # Pula ações sem volume
+                    except:
+                        pass
+            
+            # Filtros de ação saudável (já existentes)
+            if pl < 2 or pl > 30:
+                continue
+            if pvp < 0.3 or pvp > 5:
+                continue
+            if dy > 20:
+                continue
+            
+            # ============================================
+            # CONTINUA COM O RESTO DO SEU CÓDIGO...
+            # ============================================
+            
+            score = 0
+            if pl < 10:
+                score -= 5
+            elif pl < 15:
+                score -= 2
+            if pvp < 1.2:
+                score -= 4
+            elif pvp < 1.8:
+                score -= 2
+            if dy > 6:
+                score -= 3
+            elif dy > 4:
+                score -= 1
+            
+            setor_texto = colunas[2].text.strip()[:30] if len(colunas) > 2 else "N/A"
+            
+            dados.append({
+                'ticker': ticker,
+                'preco': cotacao,
+                'pl': pl,
+                'pvp': pvp,
+                'dy': dy,
+                'score': score,
+                'setor': setor_texto
+            })
+        except:
+            continue
         
         df = pd.DataFrame(dados)
         if len(df) > 0:
