@@ -12,7 +12,7 @@ import pytz
 TELEGRAM_TOKEN = "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_8Ml-iaZl387Y"
 TELEGRAM_CHAT_ID = "5869218072"
 
-HORARIO_ENVIO = 9
+HORARIO_ENVIO = 10  # 10:00 da manhã (ALTERADO de 9 para 10)
 TOP_OPORTUNIDADES = 10
 
 # ============================================
