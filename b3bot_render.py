@@ -12,7 +12,7 @@ import pytz
 TELEGRAM_TOKEN = "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_8Ml-iaZl387Y"
 TELEGRAM_CHAT_ID = "5869218072"
 
-HORARIO_ENVIO = 10  # 10:00 da manhã (ALTERADO de 9 para 10)
+HORARIO_ENVIO = 10  # 10:00 da manhã
 TOP_OPORTUNIDADES = 10
 
 # ============================================
@@ -62,83 +62,78 @@ def buscar_acoes_fundamentus():
                 return 0
         
         for linha in linhas:
-    colunas = linha.find_all('td')
-    if len(colunas) >= 10:
-        try:
-            ticker = colunas[0].text.strip()
-            
-            if not ticker or len(ticker) < 4:
-                continue
-            if not ticker[0].isalpha():
-                continue
-            if not ticker[-1].isdigit():
-                continue
-            
-            cotacao = converte_valor(colunas[1].text)
-            
-            # ============================================
-            # FILTRO DE ATIVOS "MORTOS" (SEM LIQUIDEZ)
-            # ============================================
-            if cotacao <= 0:
-                continue  # Pula ações com preço zerado
-            
-            pl = converte_valor(colunas[3].text)
-            pvp = converte_valor(colunas[4].text)
-            dy = converte_percent(colunas[5].text)
-            
-            if pl <= 0 or pvp <= 0:
-                continue  # Pula ações sem indicadores
-            
-            # Verifica volume (se disponível)
-            if len(colunas) > 6:
-                volume_texto = colunas[6].text.strip()
-                if volume_texto and volume_texto != '-':
-                    try:
-                        volume = converte_valor(volume_texto)
-                        if volume <= 0:
-                            continue  # Pula ações sem volume
-                    except:
-                        pass
-            
-            # Filtros de ação saudável (já existentes)
-            if pl < 2 or pl > 30:
-                continue
-            if pvp < 0.3 or pvp > 5:
-                continue
-            if dy > 20:
-                continue
-            
-            # ============================================
-            # CONTINUA COM O RESTO DO SEU CÓDIGO...
-            # ============================================
-            
-            score = 0
-            if pl < 10:
-                score -= 5
-            elif pl < 15:
-                score -= 2
-            if pvp < 1.2:
-                score -= 4
-            elif pvp < 1.8:
-                score -= 2
-            if dy > 6:
-                score -= 3
-            elif dy > 4:
-                score -= 1
-            
-            setor_texto = colunas[2].text.strip()[:30] if len(colunas) > 2 else "N/A"
-            
-            dados.append({
-                'ticker': ticker,
-                'preco': cotacao,
-                'pl': pl,
-                'pvp': pvp,
-                'dy': dy,
-                'score': score,
-                'setor': setor_texto
-            })
-        except:
-            continue
+            colunas = linha.find_all('td')
+            if len(colunas) >= 10:
+                try:
+                    ticker = colunas[0].text.strip()
+                    
+                    if not ticker or len(ticker) < 4:
+                        continue
+                    if not ticker[0].isalpha():
+                        continue
+                    if not ticker[-1].isdigit():
+                        continue
+                    
+                    cotacao = converte_valor(colunas[1].text)
+                    
+                    # FILTRO DE ATIVOS "MORTOS" (SEM LIQUIDEZ)
+                    if cotacao <= 0:
+                        continue
+                    
+                    pl = converte_valor(colunas[3].text)
+                    pvp = converte_valor(colunas[4].text)
+                    dy = converte_percent(colunas[5].text)
+                    
+                    if pl <= 0 or pvp <= 0:
+                        continue
+                    
+                    # Verifica volume (se disponível)
+                    if len(colunas) > 6:
+                        volume_texto = colunas[6].text.strip()
+                        if volume_texto and volume_texto != '-':
+                            try:
+                                volume = converte_valor(volume_texto)
+                                if volume <= 0:
+                                    continue
+                            except:
+                                pass
+                    
+                    # Filtros de ação saudável
+                    if pl < 2 or pl > 30:
+                        continue
+                    if pvp < 0.3 or pvp > 5:
+                        continue
+                    if dy > 20:
+                        continue
+                    
+                    # Score
+                    score = 0
+                    if pl < 10:
+                        score -= 5
+                    elif pl < 15:
+                        score -= 2
+                    if pvp < 1.2:
+                        score -= 4
+                    elif pvp < 1.8:
+                        score -= 2
+                    if dy > 6:
+                        score -= 3
+                    elif dy > 4:
+                        score -= 1
+                    
+                    setor_texto = colunas[2].text.strip()[:30] if len(colunas) > 2 else "N/A"
+                    
+                    dados.append({
+                        'ticker': ticker,
+                        'preco': cotacao,
+                        'pl': pl,
+                        'pvp': pvp,
+                        'dy': dy,
+                        'score': score,
+                        'setor': setor_texto
+                    })
+                except:
+                    continue
         
         df = pd.DataFrame(dados)
         if len(df) > 0:
@@ -150,7 +145,6 @@ def buscar_acoes_fundamentus():
         return None
 
 def calcular_suporte_dinamico(preco_atual):
-    """Calcula suporte com percentual variável baseado no preço"""
     if preco_atual < 10:
         percentual = 0.15
     elif preco_atual < 30:
@@ -217,10 +211,6 @@ def buscar_oportunidades():
     return oportunidades[:TOP_OPORTUNIDADES]
 
 def enviar_resumo_diario():
-    hoje = datetime.now().strftime('%Y-%m-%d')
-    
-    print(f"\n[ {datetime.now()}] GERANDO RESUMO")
-    
     oportunidades = buscar_oportunidades()
     
     msg = f"📊 <b>RESUMO DIÁRIO - {datetime.now().strftime('%d/%m/%Y')}</b>\n\n"
@@ -255,8 +245,7 @@ def enviar_resumo_diario():
             msg += f"📍 Distância: {opp['distancia']:.1f}% - {dist_texto}\n"
             if opp['score'] <= -10:
                 msg += f"💡 Ação muito barata! Acompanhe de perto.\n"
-            # msg += f"⚡ Setor: {opp['setor']}\n\n"  ← REMOVIDA
-            msg += "\n"  # Linha em branco
+            msg += "\n"
         
         msg += f"📌 <i>Top {len(oportunidades)} ações mais baratas</i>"
     else:
@@ -272,7 +261,7 @@ def enviar_resumo_diario():
 def monitorar_continuo():
     fuso_sp = pytz.timezone('America/Sao_Paulo')
     print(f"\n🤖 SCANNER B3 INICIADO")
-    print(f"⏰ Envio programado para às 09:00 (horário de Brasília)\n")
+    print(f"⏰ Envio programado para às {HORARIO_ENVIO}:00\n")
     
     while True:
         now = datetime.now(fuso_sp)
