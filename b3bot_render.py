@@ -62,78 +62,88 @@ def buscar_acoes_fundamentus():
                 return 0
         
         for linha in linhas:
-            colunas = linha.find_all('td')
-            if len(colunas) >= 10:
-                try:
-                    ticker = colunas[0].text.strip()
-                    
-                    if not ticker or len(ticker) < 4:
-                        continue
-                    if not ticker[0].isalpha():
-                        continue
-                    if not ticker[-1].isdigit():
-                        continue
-                    
-                    cotacao = converte_valor(colunas[1].text)
-                    
-                    # FILTRO DE ATIVOS "MORTOS" (SEM LIQUIDEZ)
-                    if cotacao <= 0:
-                        continue
-                    
-                    pl = converte_valor(colunas[3].text)
-                    pvp = converte_valor(colunas[4].text)
-                    dy = converte_percent(colunas[5].text)
-                    
-                    if pl <= 0 or pvp <= 0:
-                        continue
-                    
-                    # Verifica volume (se disponível)
-                    if len(colunas) > 6:
-                        volume_texto = colunas[6].text.strip()
-                        if volume_texto and volume_texto != '-':
-                            try:
-                                volume = converte_valor(volume_texto)
-                                if volume <= 0:
-                                    continue
-                            except:
-                                pass
-                    
-                    # Filtros de ação saudável
-                    if pl < 2 or pl > 30:
-                        continue
-                    if pvp < 0.3 or pvp > 5:
-                        continue
-                    if dy > 20:
-                        continue
-                    
-                    # Score
-                    score = 0
-                    if pl < 10:
-                        score -= 5
-                    elif pl < 15:
-                        score -= 2
-                    if pvp < 1.2:
-                        score -= 4
-                    elif pvp < 1.8:
-                        score -= 2
-                    if dy > 6:
-                        score -= 3
-                    elif dy > 4:
-                        score -= 1
-                    
-                    setor_texto = colunas[2].text.strip()[:30] if len(colunas) > 2 else "N/A"
-                    
-                    dados.append({
-                        'ticker': ticker,
-                        'preco': cotacao,
-                        'pl': pl,
-                        'pvp': pvp,
-                        'dy': dy,
-                        'score': score,
-                        'setor': setor_texto
-                    })
-                except:
-                    continue
+    colunas = linha.find_all('td')
+    if len(colunas) >= 10:
+        try:
+            ticker = colunas[0].text.strip()
+            
+            if not ticker or len(ticker) < 4:
+                continue
+            if not ticker[0].isalpha():
+                continue
+            if not ticker[-1].isdigit():
+                continue
+            
+            cotacao = converte_valor(colunas[1].text)
+            
+            # ============================================
+            # FILTRO AUTOMÁTICO DE LIQUIDEZ
+            # ============================================
+            if cotacao <= 0.50:
+                continue  # Preço muito baixo (ação morta)
+            
+            pl = converte_valor(colunas[3].text)
+            pvp = converte_valor(colunas[4].text)
+            dy = converte_percent(colunas[5].text)
+            
+            # Indicadores inconsistentes
+            if pl <= 0 or pl > 999:
+                continue
+            if pvp <= 0 or pvp > 50:
+                continue
+            if dy < 0 or dy > 50:
+                continue
+            
+            # Verifica volume médio (liquidez)
+            if len(colunas) > 6:
+                volume_texto = colunas[6].text.strip()
+                if volume_texto and volume_texto != '-':
+                    try:
+                        volume = converte_valor(volume_texto)
+                        if volume < 50000:  # Menos de R$ 50k de volume médio
+                            continue
+                    except:
+                        pass
+            
+            # Filtros de ação saudável (já existentes)
+            if pl < 2 or pl > 30:
+                continue
+            if pvp < 0.3 or pvp > 5:
+                continue
+            if dy > 20:
+                continue
+            
+            # ============================================
+            # CONTINUA COM O SCORE E DEMAIS CÁLCULOS
+            # ============================================
+            
+            score = 0
+            if pl < 10:
+                score -= 5
+            elif pl < 15:
+                score -= 2
+            if pvp < 1.2:
+                score -= 4
+            elif pvp < 1.8:
+                score -= 2
+            if dy > 6:
+                score -= 3
+            elif dy > 4:
+                score -= 1
+            
+            setor_texto = colunas[2].text.strip()[:30] if len(colunas) > 2 else "N/A"
+            
+            dados.append({
+                'ticker': ticker,
+                'preco': cotacao,
+                'pl': pl,
+                'pvp': pvp,
+                'dy': dy,
+                'score': score,
+                'setor': setor_texto
+            })
+        except:
+            continue
         
         df = pd.DataFrame(dados)
         if len(df) > 0:
