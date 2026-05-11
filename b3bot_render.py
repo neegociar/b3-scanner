@@ -61,7 +61,7 @@ def buscar_acoes_fundamentus():
             except:
                 return 0
         
-                for linha in linhas:
+                        for linha in linhas:
             colunas = linha.find_all('td')
             if len(colunas) >= 10:
                 try:
