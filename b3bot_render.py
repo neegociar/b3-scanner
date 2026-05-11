@@ -210,9 +210,14 @@ def buscar_oportunidades():
     return oportunidades[:TOP_OPORTUNIDADES]
 
 def enviar_resumo_diario():
+    # Usa o fuso horário de Brasília para a data correta
+    fuso_sp = pytz.timezone('America/Sao_Paulo')
+    agora_brasil = datetime.now(fuso_sp)
+    data_hoje = agora_brasil.strftime('%d/%m/%Y')
+    
     oportunidades = buscar_oportunidades()
     
-    msg = f"📊 <b>RESUMO DIÁRIO - {datetime.now().strftime('%d/%m/%Y')}</b>\n\n"
+    msg = f"📊 <b>RESUMO DIÁRIO - {data_hoje}</b>\n\n"
     
     if oportunidades:
         msg += f"🐋 <b>OPORTUNIDADES ({len(oportunidades)})</b>\n\n"
