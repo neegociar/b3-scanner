@@ -61,7 +61,7 @@ def buscar_acoes_fundamentus():
             except:
                 return 0
         
-                        for linha in linhas:
+        for linha in linhas:
             colunas = linha.find_all('td')
             if len(colunas) >= 10:
                 try:
@@ -76,7 +76,7 @@ def buscar_acoes_fundamentus():
                     
                     cotacao = converte_valor(colunas[1].text)
                     
-                    # Filtro de ATIVOS "MORTOS" (SEM LIQUIDEZ)
+                    # FILTRO DE ATIVOS "MORTOS" (SEM LIQUIDEZ)
                     if cotacao <= 0.50:
                         continue
                     
