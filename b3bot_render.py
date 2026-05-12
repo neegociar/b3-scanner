@@ -31,18 +31,23 @@ def buscar_acoes_fundamentus():
     try:
         url = "https://fundamentus.com.br/resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-
+        
         response = requests.get(url, headers=headers, timeout=30)
         response.encoding = 'utf-8'
-
+        
         soup = BeautifulSoup(response.text, 'html.parser')
         tabela = soup.find('table', {'id': 'tabelaResultado'})
         if not tabela:
             tabela = soup.find('table', {'class': 'resultado'})
-
+        
         dados = []
         linhas = tabela.find_all('tr')[1:]
-
+        
+        # ============================================
+        # DEBUG: Mostrar colunas da primeira linha válida
+        # ============================================
+        debug_mostrado = False
+        
         def converte_valor(texto):
             if not texto or texto == '-' or texto == '':
                 return 0
@@ -51,7 +56,7 @@ def buscar_acoes_fundamentus():
                 return float(texto)
             except:
                 return 0
-
+        
         def converte_percent(texto):
             if not texto or texto == '-' or texto == '':
                 return 0
@@ -60,53 +65,67 @@ def buscar_acoes_fundamentus():
                 return float(texto)
             except:
                 return 0
-
+        
         for linha in linhas:
             colunas = linha.find_all('td')
             if len(colunas) >= 10:
                 try:
                     ticker = colunas[0].text.strip()
                     
+                    # Pular linhas inválidas
                     if not ticker or len(ticker) < 4:
                         continue
                     if not ticker[0].isalpha():
                         continue
                     if not ticker[-1].isdigit():
                         continue
-
+                    
+                    # ============================================
+                    # DEBUG: Mostrar colunas para LEVE3
+                    # ============================================
+                    if ticker == 'LEVE3' and not debug_mostrado:
+                        print(f"\n{'='*60}")
+                        print(f"DEBUG: LEVE3 - Conteúdo das colunas")
+                        print(f"{'='*60}")
+                        for i, col in enumerate(colunas[:12]):
+                            texto = col.text.strip()[:60]
+                            print(f"colunas[{i}]: {texto}")
+                        print(f"{'='*60}\n")
+                        debug_mostrado = True
+                    
                     cotacao = converte_valor(colunas[1].text)
-
-                    # Filtro de preço mínimo
+                    
+                    # FILTRO DE ATIVOS "MORTOS" (SEM LIQUIDEZ)
                     if cotacao <= 0.50:
                         continue
-
+                    
                     pl = converte_valor(colunas[3].text)
                     pvp = converte_valor(colunas[4].text)
                     dy = converte_percent(colunas[5].text)
-
+                    
                     if pl <= 0 or pvp <= 0:
                         continue
-
-                    # Filtro de liquidez por volume (colunas[6])
+                    
+                    # Verifica volume médio (se disponível)
+                    # AJUSTE O ÍNDICE AQUI DEPOIS DO DEBUG
                     if len(colunas) > 6:
                         volume_texto = colunas[6].text.strip()
                         if volume_texto and volume_texto != '-':
                             try:
                                 volume = converte_valor(volume_texto)
-                                if volume < 200000:
+                                if volume < 200000:  # Aumentado para 200k
                                     continue
                             except:
                                 pass
-
-                    # Filtros fundamentalistas
+                    
+                    # Filtros de ação saudável
                     if pl < 2 or pl > 30:
                         continue
                     if pvp < 0.3 or pvp > 5:
                         continue
                     if dy > 20:
                         continue
-
-                    # Cálculo do Score
+                    
                     score = 0
                     if pl < 10:
                         score -= 5
@@ -120,10 +139,9 @@ def buscar_acoes_fundamentus():
                         score -= 3
                     elif dy > 4:
                         score -= 1
-
-                    # Setor (colunas[2])
+                    
                     setor_texto = colunas[2].text.strip()[:30] if len(colunas) > 2 else "N/A"
-
+                    
                     dados.append({
                         'ticker': ticker,
                         'preco': cotacao,
@@ -133,14 +151,24 @@ def buscar_acoes_fundamentus():
                         'score': score,
                         'setor': setor_texto
                     })
-                except Exception:
+                except Exception as e:
                     continue
-
+        
         df = pd.DataFrame(dados)
         if len(df) > 0:
             df = df.sort_values('score', ascending=True)
+        
+        # ============================================
+        # DEBUG: Mostrar estatísticas finais
+        # ============================================
+        print(f"\n📊 DEBUG FINAL:")
+        print(f"   Total de ações após filtros: {len(df)}")
+        if len(df) > 0:
+            print(f"   Ações com score <= -5: {len(df[df['score'] <= -5])}")
+            print(f"   Top 5 ações mais baratas: {df.head(5)['ticker'].tolist()}")
+        
         return df
-
+        
     except Exception as e:
         print(f"Erro na busca: {e}")
         return None
