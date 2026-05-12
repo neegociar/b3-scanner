@@ -93,7 +93,7 @@ def buscar_acoes_fundamentus():
                         if volume_texto and volume_texto != '-':
                             try:
                                 volume = converte_valor(volume_texto)
-                                if volume < 50000:
+                                if volume < 200000:
                                     continue
                             except:
                                 pass
