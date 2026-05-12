@@ -88,15 +88,15 @@ def buscar_acoes_fundamentus():
                         continue
                     
                     # Verifica volume médio (se disponível)
-                    if len(colunas) > 6:
-                        volume_texto = colunas[6].text.strip()
-                        if volume_texto and volume_texto != '-':
-                            try:
-                                volume = converte_valor(volume_texto)
-                                if volume < 50000:
-                                    continue
-                            except:
-                                pass
+# if len(colunas) > 6:
+#     volume_texto = colunas[6].text.strip()
+#     if volume_texto and volume_texto != '-':
+#         try:
+#             volume = converte_valor(volume_texto)
+#             if volume < 50000:
+#                 continue
+#         except:
+#             pass
                     
                     # Filtros de ação saudável
                     if pl < 2 or pl > 30:
