@@ -76,27 +76,32 @@ def buscar_acoes_fundamentus():
                     
                     cotacao = converte_valor(colunas[1].text)
                     
-                    # FILTRO DE ATIVOS "MORTOS" (SEM LIQUIDEZ)
-                    if cotacao <= 0.50:
-                        continue
-                    
-                    pl = converte_valor(colunas[3].text)
-                    pvp = converte_valor(colunas[4].text)
-                    dy = converte_percent(colunas[5].text)
-                    
-                    if pl <= 0 or pvp <= 0:
-                        continue
-                    
-                    # Verifica volume médio (se disponível)
-# if len(colunas) > 6:
-#     volume_texto = colunas[6].text.strip()
-#     if volume_texto and volume_texto != '-':
-#         try:
-#             volume = converte_valor(volume_texto)
-#             if volume < 50000:
-#                 continue
-#         except:
-#             pass
+                   # FILTRO DE ATIVOS "MORTOS" (SEM LIQUIDEZ)
+if cotacao <= 0.50:
+    continue
+
+# VERIFICA DATA DA ÚLTIMA COTAÇÃO (evita ações mortas)
+if len(colunas) > 7:
+    data_texto = colunas[7].text.strip()
+    if data_texto and data_texto != '-' and data_texto != '':
+        try:
+            data_ult_neg = datetime.strptime(data_texto, '%d/%m/%Y')
+            dias_sem_negociacao = (datetime.now() - data_ult_neg).days
+            if dias_sem_negociacao > 90:  # Mais de 90 dias sem negociação
+                continue
+        except:
+            pass
+
+# VERIFICA VOLUME MÉDIO (se disponível)
+if len(colunas) > 6:
+    volume_texto = colunas[6].text.strip()
+    if volume_texto and volume_texto != '-':
+        try:
+            volume = converte_valor(volume_texto)
+            if volume < 50000:  # Volume mínimo de R$ 50k
+                continue
+        except:
+            pass
                     
                     # Filtros de ação saudável
                     if pl < 2 or pl > 30:
