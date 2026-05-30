@@ -8,7 +8,7 @@ import requests
 import os
 
 # ============================================
-# CONFIGURAÇÕES
+# CONFIGURAÇÕES (VARIÁVEIS DE AMBIENTE)
 # ============================================
 TELEGRAM_TOKEN = "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_8Ml-iaZl387Y"
 TELEGRAM_CHAT_ID = "5869218072"
@@ -63,27 +63,42 @@ def calcular_indicadores_tecnicos(dados_historicos):
         close = dados_historicos['Close']
         low = dados_historicos['Low']
         
-        mm50 = close.rolling(50).mean().iloc[-1] if len(close) >= 50 else close.iloc[-1]
-        mm100 = close.rolling(100).mean().iloc[-1] if len(close) >= 100 else close.iloc[-1]
-        mm200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else close.iloc[-1]
+        preco = close.iloc[-1]
         
+        # Médias móveis
+        mm50 = close.rolling(50).mean().iloc[-1] if len(close) >= 50 else preco
+        mm100 = close.rolling(100).mean().iloc[-1] if len(close) >= 100 else preco
+        mm200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else preco
+        
+        # Fundo dos últimos 30 dias
         fundo_30d = low.tail(30).min()
         
-        suporte = max(mm50, mm100, mm200, fundo_30d)
+        # ============================================
+        # CORREÇÃO DO SUPORTE (apenas níveis abaixo do preço)
+        # ============================================
+        niveis = [mm50, mm100, mm200, fundo_30d]
+        suportes_validos = [n for n in niveis if n <= preco]
+        
+        if suportes_validos:
+            suporte = max(suportes_validos)  # Maior suporte abaixo do preço
+        else:
+            suporte = fundo_30d  # Fallback: fundo de 30 dias
+        
         resistencia = close.max()
         
-        dist_suporte = ((close.iloc[-1] - suporte) / suporte) * 100
+        dist_suporte = ((preco - suporte) / suporte) * 100
         
         return {
-            'preco_atual': round(close.iloc[-1], 2),
+            'preco_atual': round(preco, 2),
             'suporte': round(suporte, 2),
             'resistencia': round(resistencia, 2),
             'dist_suporte': round(dist_suporte, 1),
             'mm50': round(mm50, 2),
             'mm100': round(mm100, 2),
             'mm200': round(mm200, 2),
+            'fundo_30d': round(fundo_30d, 2)
         }
-    except:
+    except Exception as e:
         return None
 
 def buscar_acao_completa(ticker, dados_historicos):
@@ -91,10 +106,15 @@ def buscar_acao_completa(ticker, dados_historicos):
     try:
         ticker_yf = f"{ticker}.SA"
         
-        if ticker_yf not in dados_historicos:
+        # Verificação segura do MultiIndex
+        try:
+            df_acao = dados_historicos[ticker_yf]
+        except Exception:
             return None
         
-        df_acao = dados_historicos[ticker_yf]
+        if df_acao is None or df_acao.empty:
+            return None
+        
         tecnicos = calcular_indicadores_tecnicos(df_acao)
         if not tecnicos:
             return None
@@ -106,24 +126,25 @@ def buscar_acao_completa(ticker, dados_historicos):
         if preco <= 0:
             return None
         
-        volume_acoes = fast_info.get('lastVolume', 0)
-        volume_financeiro = volume_acoes * preco
+        # ============================================
+        # LIQUIDEZ MÉDIA (20 dias)
+        # ============================================
+        volume_financeiro = (
+            df_acao["Close"].tail(20) * df_acao["Volume"].tail(20)
+        ).mean()
+        
         if volume_financeiro < LIQUIDEZ_MINIMA:
             return None
         
         info = stock.info
         
-        # ============================================
-        # DADOS CONFIÁVEIS
-        # ============================================
+        # Dados fundamentalistas
         pl = info.get('trailingPE', 0)
         pvp = info.get('priceToBook', 0)
         roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
         margem = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
         
-        # ============================================
-        # DY CORRIGIDO
-        # ============================================
+        # DY corrigido
         dy_raw = info.get('dividendYield', 0)
         if dy_raw is None or dy_raw == 0:
             dy = 0
@@ -134,36 +155,29 @@ def buscar_acao_completa(ticker, dados_historicos):
         else:
             dy = 0
         
-        # Validação realista (DY máximo histórico da B3 é ~20%)
+        # Validação DY
         if dy > 25 or dy < 0:
             dy = 0
         
-        # Outros dados
         revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
         debt_to_equity = info.get('debtToEquity', 0)
         
-        # ============================================
-        # FILTROS RIGOROSOS
-        # ============================================
+        # Filtros rigorosos
         if pl < 2 or pl > 15:
             return None
         if pvp < 0.3 or pvp > 2:
             return None
-        if dy < 4:  # DY mínimo 4%
+        if dy < 4:
             return None
-        if roe < 8:  # ROE mínimo 8%
+        if roe < 8:
             return None
-        if margem < 5:  # Margem mínima 5%
+        if margem < 5:
             return None
-        if debt_to_equity > 200:  # Dívida controlada
+        if debt_to_equity > 200:
             return None
         
-        # ============================================
-        # SCORE MELHORADO
-        # ============================================
+        # Score melhorado
         score = 0
-        
-        # Fundamentos (40%)
         if pl < 8:
             score -= 4
         elif pl < 10:
@@ -176,7 +190,6 @@ def buscar_acao_completa(ticker, dados_historicos):
         elif pvp < 1.5:
             score -= 1
         
-        # Rentabilidade (30%)
         if roe > 20:
             score -= 3
         elif roe > 15:
@@ -184,57 +197,49 @@ def buscar_acao_completa(ticker, dados_historicos):
         elif roe > 10:
             score -= 1
         
-        # Dividendos (20%)
         if dy > 8:
             score -= 2
         elif dy > 6:
             score -= 1
         
-        # Crescimento (10%)
         if revenue_growth > 10:
             score -= 1
         
-        # ============================================
-        # SUPORTE CORRIGIDO
-        # ============================================
+        # Suporte já está calculado corretamente (abaixo do preço)
         suporte = tecnicos['suporte']
-        preco_atual = tecnicos['preco_atual']
+        distancia = tecnicos['dist_suporte']
         
-        if preco_atual > suporte:
-            distancia = ((preco_atual - suporte) / suporte) * 100
-            situacao = "acima"
-            if distancia <= 3:
-                classificacao = "🔴 SUPORTE FORTE - COMPRA IMEDIATA"
-            elif distancia <= 6:
-                classificacao = "🟡 PRÓXIMO SUPORTE - COMPRA PARCIAL"
-            elif distancia <= 10:
-                classificacao = "🟢 ACIMA SUPORTE - AGUARDAR"
-            else:
-                classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
+        # Classificação baseada na distância
+        if distancia <= 3:
+            classificacao = "🔴 SUPORTE FORTE - COMPRA IMEDIATA"
+        elif distancia <= 6:
+            classificacao = "🟡 PRÓXIMO SUPORTE - COMPRA PARCIAL"
+        elif distancia <= 10:
+            classificacao = "🟢 ACIMA SUPORTE - AGUARDAR"
         else:
-            distancia = ((suporte - preco_atual) / preco_atual) * 100
-            situacao = "abaixo"
-            classificacao = "⚠️ ROMPEU SUPORTE - EVITAR COMPRA"
+            classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
         
         return {
             'ticker': ticker,
-            'preco': preco_atual,
+            'preco': preco,
             'suporte': suporte,
-            'distancia': round(distancia, 1),
-            'situacao': situacao,
+            'distancia': distancia,
             'classificacao': classificacao,
             'pl': round(pl, 1),
             'pvp': round(pvp, 2),
             'dy': round(dy, 1),
             'roe': round(roe, 1),
             'score': score,
-            'volume_mm': round(volume_financeiro / 1000000, 1)
+            'volume_mm': round(volume_financeiro / 1000000, 1),
+            'mm50': tecnicos['mm50'],
+            'mm100': tecnicos['mm100'],
+            'mm200': tecnicos['mm200']
         }
     except Exception as e:
         return None
 
 def buscar_oportunidades():
-    """Busca oportunidades usando a versão melhorada"""
+    """Busca oportunidades - analisa TODAS as ações (sem break)"""
     print(f"[{datetime.now()}] Buscando tickers...")
     tickers = buscar_todos_tickers_b3()
     if not tickers:
@@ -249,31 +254,20 @@ def buscar_oportunidades():
         print("❌ Erro ao baixar dados históricos")
         return []
     
-    oportunidades = []
+    todas_oportunidades = []
     
     for i, ticker in enumerate(tickers):
         if (i+1) % 50 == 0:
             print(f"  Progresso: {i+1}/{len(tickers)}")
         
         acao = buscar_acao_completa(ticker, dados_historicos)
-        if acao and acao['distancia'] <= 15 and acao['score'] <= -5 and acao['situacao'] == 'acima':
-            oportunidades.append({
-                'ticker': ticker,
-                'preco': acao['preco'],
-                'suporte': acao['suporte'],
-                'distancia': acao['distancia'],
-                'classificacao': acao['classificacao'],
-                'pl': acao['pl'],
-                'pvp': acao['pvp'],
-                'dy': acao['dy'],
-                'roe': acao['roe'],
-                'score': acao['score']
-            })
-        
-        if len(oportunidades) >= TOP_OPORTUNIDADES:
-            break
+        if acao and acao['distancia'] <= 15 and acao['score'] <= -5:
+            todas_oportunidades.append(acao)
     
-    return sorted(oportunidades, key=lambda x: x['distancia'])[:TOP_OPORTUNIDADES]
+    # Ordena por score (mais negativo primeiro) e depois por distância
+    todas_oportunidades.sort(key=lambda x: (x['score'], x['distancia']))
+    
+    return todas_oportunidades[:TOP_OPORTUNIDADES]
 
 def enviar_resumo_diario():
     oportunidades = buscar_oportunidades()
