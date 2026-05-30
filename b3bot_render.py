@@ -10,8 +10,8 @@ import os
 # ============================================
 # CONFIGURAÇÕES (use variáveis de ambiente)
 # ============================================
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', '')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
+TELEGRAM_TOKEN = "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_8Ml-iaZl387Y"
+TELEGRAM_CHAT_ID = "5869218072"
 HORARIO_ENVIO = 10
 TOP_OPORTUNIDADES = 10
 LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
