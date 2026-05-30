@@ -16,165 +16,213 @@ HORARIO_ENVIO = 10
 TOP_OPORTUNIDADES = 10
 LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
 
-def calcular_suporte_real(ticker, preco_atual):
-    """Calcula suporte real baseado na mínima de 52 semanas"""
+def buscar_todos_tickers_b3():
+    """Busca todos os tickers da B3"""
+    tickers = []
     try:
-        dados = yf.download(f"{ticker}.SA", period="1y", progress=False)
-        if len(dados) > 0:
-            minima_ano = dados["Low"].min()
-            maxima_ano = dados["High"].max()
-            dist_min = ((preco_atual - minima_ano) / minima_ano) * 100
-            dist_max = ((maxima_ano - preco_atual) / maxima_ano) * 100
-            return round(minima_ano, 2), round(maxima_ano, 2), round(dist_min, 1), round(dist_max, 1)
+        url = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrId=6655000&count=1000"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=30)
+        data = response.json()
+        
+        quotes = data.get('finance', {}).get('result', [{}])[0].get('quotes', [])
+        for quote in quotes:
+            symbol = quote.get('symbol', '')
+            if symbol.endswith('.SA') and len(symbol) >= 6:
+                ticker = symbol.replace('.SA', '')
+                if ticker and ticker[-1] in '3456':
+                    tickers.append(ticker)
+        
+        if len(tickers) > 50:
+            return tickers
     except:
         pass
-    return None, None, None, None
+    
+    # Fallback
+    return ["PETR4", "VALE3", "ITUB4", "BBDC4", "ABEV3", "BBAS3", "WEGE3", "ITSA4"]
 
-def buscar_acao_completa(ticker):
-    """Busca dados completos da ação (fundamentos + suporte real)"""
+def calcular_indicadores_tecnicos(dados_historicos):
+    """Calcula médias móveis e suportes"""
+    if dados_historicos.empty:
+        return None
+    
+    try:
+        close = dados_historicos['Close']
+        low = dados_historicos['Low']
+        
+        mm50 = close.rolling(50).mean().iloc[-1] if len(close) >= 50 else close.iloc[-1]
+        mm100 = close.rolling(100).mean().iloc[-1] if len(close) >= 100 else close.iloc[-1]
+        mm200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else close.iloc[-1]
+        
+        fundo_30d = low.tail(30).min()
+        fundo_52s = low.min()
+        
+        suporte = max(mm50, mm100, mm200, fundo_30d)
+        resistencia = close.max()
+        
+        dist_suporte = ((close.iloc[-1] - suporte) / suporte) * 100
+        dist_resistencia = ((resistencia - close.iloc[-1]) / close.iloc[-1]) * 100
+        
+        return {
+            'preco_atual': round(close.iloc[-1], 2),
+            'suporte': round(suporte, 2),
+            'resistencia': round(resistencia, 2),
+            'dist_suporte': round(dist_suporte, 1),
+            'dist_resistencia': round(dist_resistencia, 1),
+            'mm50': round(mm50, 2),
+            'mm100': round(mm100, 2),
+            'mm200': round(mm200, 2),
+            'fundo_52s': round(fundo_52s, 2)
+        }
+    except:
+        return None
+
+def buscar_acao_completa(ticker, dados_historicos):
+    """Busca dados completos da ação (fundamentos + análise técnica)"""
     try:
         ticker_yf = f"{ticker}.SA"
         stock = yf.Ticker(ticker_yf)
-        info = stock.info
         
-        preco = info.get('regularMarketPrice', 0)
+        # Dados técnicos
+        if ticker_yf in dados_historicos:
+            df_acao = dados_historicos[ticker_yf]
+            tecnicos = calcular_indicadores_tecnicos(df_acao)
+            if not tecnicos:
+                return None
+        else:
+            return None
+        
+        # Fundamentos usando fast_info (mais confiável)
+        fast_info = stock.fast_info
+        preco = fast_info.get('lastPrice', 0)
         if preco <= 0:
             return None
         
-        # Fundamentos
+        volume_diario = fast_info.get('lastVolume', 0) * preco
+        if volume_diario < LIQUIDEZ_MINIMA:
+            return None
+        
+        # Dados fundamentalistas
+        info = stock.info
         pl = info.get('trailingPE', 0)
         pvp = info.get('priceToBook', 0)
         dy = info.get('dividendYield', 0) * 100 if info.get('dividendYield') else 0
         roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
         margem = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
-        divida_ebitda = info.get('debtToEquity', 999)
-        volume = info.get('averageVolume', 0) * preco  # Volume em R$
+        revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
+        debt_to_equity = info.get('debtToEquity', 0)
         
         # Filtros rigorosos
-        if pl < 2 or pl > 30:
+        if pl < 2 or pl > 15:
             return None
-        if pvp < 0.3 or pvp > 5:
+        if pvp < 0.3 or pvp > 2:
             return None
-        if dy > 20:
+        if dy < 4:
             return None
-        if roe < 10:  # ROE mínimo 10%
+        if roe < 8:
             return None
-        if margem < 0:  # Margem líquida positiva
+        if margem < 5:
             return None
-        if divida_ebitda > 3:  # Dívida controlada
-            return None
-        if volume < LIQUIDEZ_MINIMA:  # Liquidez mínima R$1M
+        if debt_to_equity > 200:  # Dívida > 2x patrimônio
             return None
         
-        # Score melhorado (prioriza empresas saudáveis)
+        # Score melhorado (40% fundamentos, 30% rentabilidade, 20% dividendos, 10% crescimento)
         score = 0
-        if pl < 10:
-            score -= 5
-        elif pl < 15:
-            score -= 2
-        if pvp < 1.2:
+        
+        # Fundamentos (40%)
+        if pl < 8:
             score -= 4
-        elif pvp < 1.8:
-            score -= 2
-        if dy > 8:
-            score -= 4
-        elif dy > 6:
+        elif pl < 10:
             score -= 3
-        elif dy > 4:
-            score -= 1
-        if roe > 20:  # Bônus para ROE alto
-            score -= 2
-        if margem > 15:  # Bônus para margem alta
+        elif pl < 12:
             score -= 1
         
-        # Suporte real
-        suporte, topo, dist_suporte, dist_topo = calcular_suporte_real(ticker, preco)
+        if pvp < 1:
+            score -= 3
+        elif pvp < 1.5:
+            score -= 1
+        
+        # Rentabilidade (30%)
+        if roe > 20:
+            score -= 3
+        elif roe > 15:
+            score -= 2
+        elif roe > 10:
+            score -= 1
+        
+        # Dividendos (20%)
+        if dy > 8:
+            score -= 2
+        elif dy > 6:
+            score -= 1
+        
+        # Crescimento (10%)
+        if revenue_growth > 10:
+            score -= 1
         
         return {
             'ticker': ticker,
-            'preco': preco,
+            'preco': tecnicos['preco_atual'],
+            'suporte': tecnicos['suporte'],
+            'distancia': tecnicos['dist_suporte'],
             'pl': pl,
             'pvp': pvp,
             'dy': dy,
             'roe': roe,
             'margem': margem,
             'score': score,
-            'suporte': suporte,
-            'topo': topo,
-            'dist_suporte': dist_suporte,
-            'dist_topo': dist_topo,
-            'volume_mm': round(volume / 1000000, 1)
+            'volume_mm': round(volume_diario / 1000000, 1),
+            'mm50': tecnicos['mm50'],
+            'mm100': tecnicos['mm100'],
+            'mm200': tecnicos['mm200']
         }
     except Exception as e:
         return None
 
-def buscar_todas_acoes(tickers):
-    """Busca dados de todas as ações em paralelo"""
-    dados = []
-    print(f"📊 Buscando {len(tickers)} ações em paralelo...")
-    
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(buscar_acao_completa, t): t for t in tickers}
-        
-        for i, future in enumerate(as_completed(futures)):
-            if (i+1) % 50 == 0:
-                print(f"  Progresso: {i+1}/{len(tickers)}")
-            
-            resultado = future.result()
-            if resultado:
-                dados.append(resultado)
-    
-    df = pd.DataFrame(dados)
-    if not df.empty:
-        df = df.sort_values('score', ascending=True)
-    
-    print(f"✅ {len(df)} ações aprovadas")
-    return df
-
 def buscar_oportunidades():
     """Busca oportunidades usando a versão melhorada"""
-    print(f"[{datetime.now()}] Buscando ações...")
-    
-    # Busca tickers da B3
+    print(f"[{datetime.now()}] Buscando tickers...")
     tickers = buscar_todos_tickers_b3()
     if not tickers:
         return []
     
-    df = buscar_todas_acoes(tickers)
-    if df is None or len(df) == 0:
-        return []
+    print(f"📊 Analisando {len(tickers)} ações...")
     
-    # Filtra por score e distância do suporte real
-    df_filtrado = df[(df['score'] <= -5) & (df['dist_suporte'] <= 15)]
+    # Download único de dados históricos
+    tickers_yf = [f"{t}.SA" for t in tickers]
+    dados_historicos = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=30)
     
-    if df_filtrado.empty:
-        return []
-    
-    top_acoes = df_filtrado.head(TOP_OPORTUNIDADES)
     oportunidades = []
     
-    for _, row in top_acoes.iterrows():
-        if row['dist_suporte'] <= 3:
-            classificacao = "🔴 SUPORTE FORTE - COMPRA IMEDIATA"
-        elif row['dist_suporte'] <= 6:
-            classificacao = "🟡 PRÓXIMO SUPORTE - COMPRA PARCIAL"
-        elif row['dist_suporte'] <= 10:
-            classificacao = "🟢 ACIMA SUPORTE - AGUARDAR"
-        else:
-            classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
+    for ticker in tickers:
+        acao = buscar_acao_completa(ticker, dados_historicos)
+        if acao:
+            if acao['distancia'] <= 15 and acao['score'] <= -5:
+                if acao['distancia'] <= 3:
+                    classificacao = "🔴 SUPORTE FORTE - COMPRA IMEDIATA"
+                elif acao['distancia'] <= 6:
+                    classificacao = "🟡 PRÓXIMO SUPORTE - COMPRA PARCIAL"
+                elif acao['distancia'] <= 10:
+                    classificacao = "🟢 ACIMA SUPORTE - AGUARDAR"
+                else:
+                    classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
+                
+                oportunidades.append({
+                    'ticker': ticker,
+                    'preco': acao['preco'],
+                    'suporte': acao['suporte'],
+                    'distancia': acao['distancia'],
+                    'classificacao': classificacao,
+                    'pl': acao['pl'],
+                    'pvp': acao['pvp'],
+                    'dy': acao['dy'],
+                    'roe': acao['roe'],
+                    'score': acao['score']
+                })
         
-        oportunidades.append({
-            'ticker': row['ticker'],
-            'preco': row['preco'],
-            'suporte': row['suporte'],
-            'distancia': row['dist_suporte'],
-            'classificacao': classificacao,
-            'pl': row['pl'],
-            'pvp': row['pvp'],
-            'dy': row['dy'],
-            'roe': row['roe'],
-            'score': row['score'],
-            'volume_mm': row['volume_mm']
-        })
+        if len(oportunidades) >= TOP_OPORTUNIDADES:
+            break
     
-    return oportunidades
+    return sorted(oportunidades, key=lambda x: x['distancia'])[:TOP_OPORTUNIDADES]
+
+# ... (resto do código: enviar_telegram, enviar_resumo_diario, monitorar_continuo, Flask)
