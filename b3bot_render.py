@@ -5,16 +5,28 @@ import time
 import threading
 import pytz
 import requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
 
 # ============================================
-# CONFIGURAÇÕES
+# CONFIGURAÇÕES (use variáveis de ambiente)
 # ============================================
-TELEGRAM_TOKEN = "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_8Ml-iaZl387Y"
-TELEGRAM_CHAT_ID = "5869218072"
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', '')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 HORARIO_ENVIO = 10
 TOP_OPORTUNIDADES = 10
 LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
+
+def enviar_telegram(mensagem):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("⚠️ Telegram não configurado")
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mensagem, "parse_mode": "HTML"}
+        r = requests.post(url, json=payload, timeout=5)
+        return r.status_code == 200
+    except:
+        return False
 
 def buscar_todos_tickers_b3():
     """Busca todos os tickers da B3"""
@@ -34,16 +46,17 @@ def buscar_todos_tickers_b3():
                     tickers.append(ticker)
         
         if len(tickers) > 50:
+            print(f"✅ {len(tickers)} tickers encontrados")
             return tickers
-    except:
-        pass
+    except Exception as e:
+        print(f"⚠️ Erro na busca: {e}")
     
     # Fallback
     return ["PETR4", "VALE3", "ITUB4", "BBDC4", "ABEV3", "BBAS3", "WEGE3", "ITSA4"]
 
 def calcular_indicadores_tecnicos(dados_historicos):
     """Calcula médias móveis e suportes"""
-    if dados_historicos.empty:
+    if dados_historicos.empty or len(dados_historicos) < 30:
         return None
     
     try:
@@ -55,54 +68,50 @@ def calcular_indicadores_tecnicos(dados_historicos):
         mm200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else close.iloc[-1]
         
         fundo_30d = low.tail(30).min()
-        fundo_52s = low.min()
         
         suporte = max(mm50, mm100, mm200, fundo_30d)
         resistencia = close.max()
         
         dist_suporte = ((close.iloc[-1] - suporte) / suporte) * 100
-        dist_resistencia = ((resistencia - close.iloc[-1]) / close.iloc[-1]) * 100
         
         return {
             'preco_atual': round(close.iloc[-1], 2),
             'suporte': round(suporte, 2),
             'resistencia': round(resistencia, 2),
             'dist_suporte': round(dist_suporte, 1),
-            'dist_resistencia': round(dist_resistencia, 1),
             'mm50': round(mm50, 2),
             'mm100': round(mm100, 2),
             'mm200': round(mm200, 2),
-            'fundo_52s': round(fundo_52s, 2)
         }
     except:
         return None
 
 def buscar_acao_completa(ticker, dados_historicos):
-    """Busca dados completos da ação (fundamentos + análise técnica)"""
+    """Busca dados completos da ação"""
     try:
         ticker_yf = f"{ticker}.SA"
-        stock = yf.Ticker(ticker_yf)
         
-        # Dados técnicos
-        if ticker_yf in dados_historicos:
-            df_acao = dados_historicos[ticker_yf]
-            tecnicos = calcular_indicadores_tecnicos(df_acao)
-            if not tecnicos:
-                return None
-        else:
+        # Verifica se tem dados históricos
+        if ticker_yf not in dados_historicos:
             return None
         
-        # Fundamentos usando fast_info (mais confiável)
+        df_acao = dados_historicos[ticker_yf]
+        tecnicos = calcular_indicadores_tecnicos(df_acao)
+        if not tecnicos:
+            return None
+        
+        stock = yf.Ticker(ticker_yf)
         fast_info = stock.fast_info
-        preco = fast_info.get('lastPrice', 0)
+        
+        preco = tecnicos['preco_atual']
         if preco <= 0:
             return None
         
-        volume_diario = fast_info.get('lastVolume', 0) * preco
-        if volume_diario < LIQUIDEZ_MINIMA:
+        volume_acoes = fast_info.get('lastVolume', 0)
+        volume_financeiro = volume_acoes * preco
+        if volume_financeiro < LIQUIDEZ_MINIMA:
             return None
         
-        # Dados fundamentalistas
         info = stock.info
         pl = info.get('trailingPE', 0)
         pvp = info.get('priceToBook', 0)
@@ -112,7 +121,7 @@ def buscar_acao_completa(ticker, dados_historicos):
         revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
         debt_to_equity = info.get('debtToEquity', 0)
         
-        # Filtros rigorosos
+        # Filtros
         if pl < 2 or pl > 15:
             return None
         if pvp < 0.3 or pvp > 2:
@@ -123,13 +132,11 @@ def buscar_acao_completa(ticker, dados_historicos):
             return None
         if margem < 5:
             return None
-        if debt_to_equity > 200:  # Dívida > 2x patrimônio
+        if debt_to_equity > 200:
             return None
         
-        # Score melhorado (40% fundamentos, 30% rentabilidade, 20% dividendos, 10% crescimento)
+        # Score
         score = 0
-        
-        # Fundamentos (40%)
         if pl < 8:
             score -= 4
         elif pl < 10:
@@ -142,7 +149,6 @@ def buscar_acao_completa(ticker, dados_historicos):
         elif pvp < 1.5:
             score -= 1
         
-        # Rentabilidade (30%)
         if roe > 20:
             score -= 3
         elif roe > 15:
@@ -150,13 +156,11 @@ def buscar_acao_completa(ticker, dados_historicos):
         elif roe > 10:
             score -= 1
         
-        # Dividendos (20%)
         if dy > 8:
             score -= 2
         elif dy > 6:
             score -= 1
         
-        # Crescimento (10%)
         if revenue_growth > 10:
             score -= 1
         
@@ -165,16 +169,12 @@ def buscar_acao_completa(ticker, dados_historicos):
             'preco': tecnicos['preco_atual'],
             'suporte': tecnicos['suporte'],
             'distancia': tecnicos['dist_suporte'],
-            'pl': pl,
-            'pvp': pvp,
-            'dy': dy,
-            'roe': roe,
-            'margem': margem,
+            'pl': round(pl, 1),
+            'pvp': round(pvp, 2),
+            'dy': round(dy, 1),
+            'roe': round(roe, 1),
             'score': score,
-            'volume_mm': round(volume_diario / 1000000, 1),
-            'mm50': tecnicos['mm50'],
-            'mm100': tecnicos['mm100'],
-            'mm200': tecnicos['mm200']
+            'volume_mm': round(volume_financeiro / 1000000, 1)
         }
     except Exception as e:
         return None
@@ -188,41 +188,99 @@ def buscar_oportunidades():
     
     print(f"📊 Analisando {len(tickers)} ações...")
     
-    # Download único de dados históricos
     tickers_yf = [f"{t}.SA" for t in tickers]
-    dados_historicos = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=30)
+    dados_historicos = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=60)
+    
+    if dados_historicos is None or dados_historicos.empty:
+        print("❌ Erro ao baixar dados históricos")
+        return []
     
     oportunidades = []
     
-    for ticker in tickers:
+    for i, ticker in enumerate(tickers):
+        if (i+1) % 50 == 0:
+            print(f"  Progresso: {i+1}/{len(tickers)}")
+        
         acao = buscar_acao_completa(ticker, dados_historicos)
-        if acao:
-            if acao['distancia'] <= 15 and acao['score'] <= -5:
-                if acao['distancia'] <= 3:
-                    classificacao = "🔴 SUPORTE FORTE - COMPRA IMEDIATA"
-                elif acao['distancia'] <= 6:
-                    classificacao = "🟡 PRÓXIMO SUPORTE - COMPRA PARCIAL"
-                elif acao['distancia'] <= 10:
-                    classificacao = "🟢 ACIMA SUPORTE - AGUARDAR"
-                else:
-                    classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
-                
-                oportunidades.append({
-                    'ticker': ticker,
-                    'preco': acao['preco'],
-                    'suporte': acao['suporte'],
-                    'distancia': acao['distancia'],
-                    'classificacao': classificacao,
-                    'pl': acao['pl'],
-                    'pvp': acao['pvp'],
-                    'dy': acao['dy'],
-                    'roe': acao['roe'],
-                    'score': acao['score']
-                })
+        if acao and acao['distancia'] <= 15 and acao['score'] <= -5:
+            if acao['distancia'] <= 3:
+                classificacao = "🔴 SUPORTE FORTE - COMPRA IMEDIATA"
+            elif acao['distancia'] <= 6:
+                classificacao = "🟡 PRÓXIMO SUPORTE - COMPRA PARCIAL"
+            elif acao['distancia'] <= 10:
+                classificacao = "🟢 ACIMA SUPORTE - AGUARDAR"
+            else:
+                classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
+            
+            oportunidades.append({
+                'ticker': ticker,
+                'preco': acao['preco'],
+                'suporte': acao['suporte'],
+                'distancia': acao['distancia'],
+                'classificacao': classificacao,
+                'pl': acao['pl'],
+                'pvp': acao['pvp'],
+                'dy': acao['dy'],
+                'roe': acao['roe'],
+                'score': acao['score']
+            })
         
         if len(oportunidades) >= TOP_OPORTUNIDADES:
             break
     
     return sorted(oportunidades, key=lambda x: x['distancia'])[:TOP_OPORTUNIDADES]
 
-# ... (resto do código: enviar_telegram, enviar_resumo_diario, monitorar_continuo, Flask)
+def enviar_resumo_diario():
+    oportunidades = buscar_oportunidades()
+    
+    msg = f"📊 <b>RESUMO DIÁRIO - {datetime.now().strftime('%d/%m/%Y')}</b>\n\n"
+    
+    if oportunidades:
+        msg += f"🐋 <b>OPORTUNIDADES ({len(oportunidades)})</b>\n\n"
+        for i, opp in enumerate(oportunidades, 1):
+            msg += f"<b>{i}. {opp['ticker']}</b>\n"
+            msg += f"💰 Preço: R$ {opp['preco']:.2f}\n"
+            msg += f"📊 Score: {opp['score']} | P/L: {opp['pl']}x | P/VP: {opp['pvp']}x\n"
+            msg += f"💰 DY: {opp['dy']}% | ROE: {opp['roe']}%\n"
+            msg += f"🎯 Suporte: R$ {opp['suporte']:.2f}\n"
+            msg += f"📍 Distância: {opp['distancia']}%\n"
+            msg += f"⚡ {opp['classificacao']}\n\n"
+        msg += f"📌 <i>Top {len(oportunidades)} ações mais baratas</i>"
+    else:
+        msg += f"✅ Nenhuma oportunidade encontrada hoje."
+    
+    enviar_telegram(msg)
+    return oportunidades
+
+def monitorar_continuo():
+    fuso_sp = pytz.timezone('America/Sao_Paulo')
+    print(f"\n🤖 SCANNER B3 INICIADO")
+    print(f"⏰ Envio programado para às {HORARIO_ENVIO}:00\n")
+    while True:
+        now = datetime.now(fuso_sp)
+        if now.hour == HORARIO_ENVIO and now.minute < 5:
+            enviar_resumo_diario()
+            time.sleep(60)
+        time.sleep(30)
+
+from flask import Flask, jsonify
+app = Flask(__name__)
+
+@app.route('/')
+def health():
+    return "B3 Scanner Online", 200
+
+@app.route('/scan')
+def scan_manual():
+    oportunidades = enviar_resumo_diario()
+    return f"Scan OK. {len(oportunidades)} oportunidades.", 200
+
+@app.route('/oportunidades')
+def ver_oportunidades():
+    oportunidades = buscar_oportunidades()
+    return jsonify({"total": len(oportunidades), "oportunidades": oportunidades})
+
+if __name__ == "__main__":
+    thread = threading.Thread(target=monitorar_continuo, daemon=True)
+    thread.start()
+    app.run(host='0.0.0.0', port=8080)
