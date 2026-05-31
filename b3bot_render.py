@@ -8,13 +8,13 @@ import requests
 import os
 
 # ============================================
-# CONFIGURAÇÕES (VARIÁVEIS DE AMBIENTE)
+# CONFIGURAÇÕES
 # ============================================
-TELEGRAM_TOKEN = "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_8Ml-iaZl387Y"
-TELEGRAM_CHAT_ID = "5869218072"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_8Ml-iaZl387Y")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5869218072")
 HORARIO_ENVIO = 10
 TOP_OPORTUNIDADES = 10
-LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
+LIQUIDEZ_MINIMA = 1000000
 
 def enviar_telegram(mensagem):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -29,14 +29,12 @@ def enviar_telegram(mensagem):
         return False
 
 def buscar_todos_tickers_b3():
-    """Busca todos os tickers da B3"""
     tickers = []
     try:
         url = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?scrId=6655000&count=1000"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(url, headers=headers, timeout=30)
         data = response.json()
-        
         quotes = data.get('finance', {}).get('result', [{}])[0].get('quotes', [])
         for quote in quotes:
             symbol = quote.get('symbol', '')
@@ -44,50 +42,33 @@ def buscar_todos_tickers_b3():
                 ticker = symbol.replace('.SA', '')
                 if ticker and ticker[-1] in '3456':
                     tickers.append(ticker)
-        
         if len(tickers) > 50:
             print(f"✅ {len(tickers)} tickers encontrados")
             return tickers
     except Exception as e:
         print(f"⚠️ Erro na busca: {e}")
-    
-    # Fallback
+
     return ["PETR4", "VALE3", "ITUB4", "BBDC4", "ABEV3", "BBAS3", "WEGE3", "ITSA4"]
 
 def calcular_indicadores_tecnicos(dados_historicos):
-    """Calcula médias móveis e suportes"""
     if dados_historicos.empty or len(dados_historicos) < 30:
         return None
-    
     try:
         close = dados_historicos['Close']
         low = dados_historicos['Low']
-        
         preco = close.iloc[-1]
-        
-        # Médias móveis
         mm50 = close.rolling(50).mean().iloc[-1] if len(close) >= 50 else preco
         mm100 = close.rolling(100).mean().iloc[-1] if len(close) >= 100 else preco
         mm200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else preco
-        
-        # Fundo dos últimos 30 dias
         fundo_30d = low.tail(30).min()
-        
-        # ============================================
-        # CORREÇÃO DO SUPORTE (apenas níveis abaixo do preço)
-        # ============================================
         niveis = [mm50, mm100, mm200, fundo_30d]
         suportes_validos = [n for n in niveis if n <= preco]
-        
         if suportes_validos:
-            suporte = max(suportes_validos)  # Maior suporte abaixo do preço
+            suporte = max(suportes_validos)
         else:
-            suporte = fundo_30d  # Fallback: fundo de 30 dias
-        
+            suporte = fundo_30d
         resistencia = close.max()
-        
-        dist_suporte = ((preco - suporte) / suporte) * 100
-        
+        dist_suporte = ((preco - suporte) / suporte) * 100 if suporte > 0 else 0
         return {
             'preco_atual': round(preco, 2),
             'suporte': round(suporte, 2),
@@ -98,78 +79,45 @@ def calcular_indicadores_tecnicos(dados_historicos):
             'mm200': round(mm200, 2),
             'fundo_30d': round(fundo_30d, 2)
         }
-    except Exception as e:
+    except:
         return None
 
 def buscar_acao_completa(ticker, dados_historicos):
-    """Busca dados completos da ação"""
     try:
         ticker_yf = f"{ticker}.SA"
-        
-        # Verificação segura do MultiIndex
         try:
             df_acao = dados_historicos[ticker_yf]
         except Exception:
             return None
-        
         if df_acao is None or df_acao.empty:
             return None
-        
         tecnicos = calcular_indicadores_tecnicos(df_acao)
         if not tecnicos:
             return None
-        
         stock = yf.Ticker(ticker_yf)
         fast_info = stock.fast_info
-        
         preco = tecnicos['preco_atual']
         if preco <= 0:
             return None
-        
-        # ============================================
-        # LIQUIDEZ MÉDIA (20 dias)
-        # ============================================
-        volume_financeiro = (
-            df_acao["Close"].tail(20) * df_acao["Volume"].tail(20)
-        ).mean()
-        
+        volume_financeiro = (df_acao["Close"].tail(20) * df_acao["Volume"].tail(20)).mean()
         if volume_financeiro < LIQUIDEZ_MINIMA:
             return None
-        
         info = stock.info
-        
-        # Dados fundamentalistas
         pl = info.get('trailingPE', 0)
         pvp = info.get('priceToBook', 0)
         roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
         margem = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
-        
-# ============================================
-# DY CORRIGIDO (busca trailingAnnualDividendYield)
-# ============================================
-dy_raw = info.get('trailingAnnualDividendYield', 0)  # Usa trailing (já realizado)
-
-if dy_raw is None or dy_raw == 0:
-    # Fallback: tenta dividendYield normal
-    dy_raw = info.get('dividendYield', 0)
-    if dy_raw is None or dy_raw == 0:
-        dy = 0
-    elif dy_raw > 1:
-        dy = dy_raw
-    else:
-        dy = dy_raw * 100
-else:
-    # trailingAnnualDividendYield já vem em percentual (ex: 0.068 = 6.8%)
-    dy = dy_raw * 100
-
-# Validação realista (DY máximo histórico da B3 é ~10%)
-if dy > 10 or dy < 0:
-    dy = 0
-        
+        dy_raw = info.get('dividendYield', 0)
+        if dy_raw is None or dy_raw == 0:
+            dy = 0
+        elif dy_raw > 1:
+            dy = dy_raw
+        else:
+            dy = dy_raw * 100
+        if dy > 10 or dy < 0:
+            dy = 0
         revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
         debt_to_equity = info.get('debtToEquity', 0)
-        
-        # Filtros rigorosos
         if pl < 2 or pl > 15:
             return None
         if pvp < 0.3 or pvp > 2:
@@ -182,8 +130,6 @@ if dy > 10 or dy < 0:
             return None
         if debt_to_equity > 200:
             return None
-        
-        # Score melhorado
         score = 0
         if pl < 8:
             score -= 4
@@ -191,32 +137,24 @@ if dy > 10 or dy < 0:
             score -= 3
         elif pl < 12:
             score -= 1
-        
         if pvp < 1:
             score -= 3
         elif pvp < 1.5:
             score -= 1
-        
         if roe > 20:
             score -= 3
         elif roe > 15:
             score -= 2
         elif roe > 10:
             score -= 1
-        
         if dy > 8:
             score -= 2
         elif dy > 6:
             score -= 1
-        
         if revenue_growth > 10:
             score -= 1
-        
-        # Suporte já está calculado corretamente (abaixo do preço)
         suporte = tecnicos['suporte']
         distancia = tecnicos['dist_suporte']
-        
-        # Classificação baseada na distância
         if distancia <= 3:
             classificacao = "🔴 SUPORTE FORTE - COMPRA IMEDIATA"
         elif distancia <= 6:
@@ -225,7 +163,6 @@ if dy > 10 or dy < 0:
             classificacao = "🟢 ACIMA SUPORTE - AGUARDAR"
         else:
             classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
-        
         return {
             'ticker': ticker,
             'preco': preco,
@@ -246,41 +183,29 @@ if dy > 10 or dy < 0:
         return None
 
 def buscar_oportunidades():
-    """Busca oportunidades - analisa TODAS as ações (sem break)"""
     print(f"[{datetime.now()}] Buscando tickers...")
     tickers = buscar_todos_tickers_b3()
     if not tickers:
         return []
-    
     print(f"📊 Analisando {len(tickers)} ações...")
-    
     tickers_yf = [f"{t}.SA" for t in tickers]
     dados_historicos = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=60)
-    
     if dados_historicos is None or dados_historicos.empty:
         print("❌ Erro ao baixar dados históricos")
         return []
-    
     todas_oportunidades = []
-    
     for i, ticker in enumerate(tickers):
         if (i+1) % 50 == 0:
             print(f"  Progresso: {i+1}/{len(tickers)}")
-        
         acao = buscar_acao_completa(ticker, dados_historicos)
         if acao and acao['distancia'] <= 15 and acao['score'] <= -5:
             todas_oportunidades.append(acao)
-    
-    # Ordena por score (mais negativo primeiro) e depois por distância
     todas_oportunidades.sort(key=lambda x: (x['score'], x['distancia']))
-    
     return todas_oportunidades[:TOP_OPORTUNIDADES]
 
 def enviar_resumo_diario():
     oportunidades = buscar_oportunidades()
-    
     msg = f"📊 <b>RESUMO DIÁRIO - {datetime.now().strftime('%d/%m/%Y')}</b>\n\n"
-    
     if oportunidades:
         msg += f"🐋 <b>OPORTUNIDADES ({len(oportunidades)})</b>\n\n"
         for i, opp in enumerate(oportunidades, 1):
@@ -294,7 +219,6 @@ def enviar_resumo_diario():
         msg += f"📌 <i>Top {len(oportunidades)} ações mais baratas</i>"
     else:
         msg += f"✅ Nenhuma oportunidade encontrada hoje."
-    
     enviar_telegram(msg)
     return oportunidades
 
