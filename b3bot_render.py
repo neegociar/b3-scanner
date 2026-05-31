@@ -10,11 +10,11 @@ import os
 # ============================================
 # CONFIGURAÇÕES
 # ============================================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_8Ml-iaZl387Y")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5869218072")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 HORARIO_ENVIO = 10
 TOP_OPORTUNIDADES = 10
-LIQUIDEZ_MINIMA = 1000000
+LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
 
 def enviar_telegram(mensagem):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -99,15 +99,19 @@ def buscar_acao_completa(ticker, dados_historicos):
         preco = tecnicos['preco_atual']
         if preco <= 0:
             return None
+        
+        # LIQUIDEZ MÉDIA (20 dias) - JÁ IMPLEMENTADO
         volume_financeiro = (df_acao["Close"].tail(20) * df_acao["Volume"].tail(20)).mean()
         if volume_financeiro < LIQUIDEZ_MINIMA:
             return None
+        
         info = stock.info
         pl = info.get('trailingPE', 0)
         pvp = info.get('priceToBook', 0)
         roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
         margem = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
         
+        # DY CORRIGIDO (trailing) - JÁ IMPLEMENTADO
         dy_raw = info.get('trailingAnnualDividendYield', 0)
         if dy_raw is None or dy_raw == 0:
             dy_raw = info.get('dividendYield', 0)
@@ -125,6 +129,9 @@ def buscar_acao_completa(ticker, dados_historicos):
         revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
         debt_to_equity = info.get('debtToEquity', 0)
         
+        # ============================================
+        # FILTROS JÁ EXISTENTES (mantidos)
+        # ============================================
         if pl < 2 or pl > 15:
             return None
         if pvp < 0.3 or pvp > 2:
@@ -138,6 +145,16 @@ def buscar_acao_completa(ticker, dados_historicos):
         if debt_to_equity > 200:
             return None
         
+        # ============================================
+        # NOVO FILTRO: CRESCIMENTO DE RECEITA POSITIVO
+        # (Apenas ADICIONADO, sem remover nada)
+        # ============================================
+        if revenue_growth <= 0:
+            return None  # Exclui empresas com receita encolhendo
+        
+        # ============================================
+        # SCORE (mantido)
+        # ============================================
         score = 0
         if pl < 8:
             score -= 4
@@ -160,8 +177,11 @@ def buscar_acao_completa(ticker, dados_historicos):
         elif dy > 6:
             score -= 1
         if revenue_growth > 10:
-            score -= 1
+            score -= 1  # Bônus para crescimento forte (mantido)
         
+        # ============================================
+        # SUPORTE E CLASSIFICAÇÃO (mantidos)
+        # ============================================
         suporte = tecnicos['suporte']
         distancia = tecnicos['dist_suporte']
         if distancia <= 3:
