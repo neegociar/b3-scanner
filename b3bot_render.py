@@ -144,20 +144,27 @@ def buscar_acao_completa(ticker, dados_historicos):
         roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
         margem = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
         
-        # DY corrigido
-        dy_raw = info.get('dividendYield', 0)
-        if dy_raw is None or dy_raw == 0:
-            dy = 0
-        elif dy_raw > 1:
-            dy = dy_raw
-        elif dy_raw <= 1:
-            dy = dy_raw * 100
-        else:
-            dy = 0
-        
-        # Validação DY
-        if dy > 25 or dy < 0:
-            dy = 0
+# ============================================
+# DY CORRIGIDO (busca trailingAnnualDividendYield)
+# ============================================
+dy_raw = info.get('trailingAnnualDividendYield', 0)  # Usa trailing (já realizado)
+
+if dy_raw is None or dy_raw == 0:
+    # Fallback: tenta dividendYield normal
+    dy_raw = info.get('dividendYield', 0)
+    if dy_raw is None or dy_raw == 0:
+        dy = 0
+    elif dy_raw > 1:
+        dy = dy_raw
+    else:
+        dy = dy_raw * 100
+else:
+    # trailingAnnualDividendYield já vem em percentual (ex: 0.068 = 6.8%)
+    dy = dy_raw * 100
+
+# Validação realista (DY máximo histórico da B3 é ~10%)
+if dy > 10 or dy < 0:
+    dy = 0
         
         revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
         debt_to_equity = info.get('debtToEquity', 0)
