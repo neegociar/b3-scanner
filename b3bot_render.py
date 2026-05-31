@@ -103,19 +103,33 @@ def buscar_acao_completa(ticker, dados_historicos):
         if volume_financeiro < LIQUIDEZ_MINIMA:
             return None
         info = stock.info
-        pl = info.get('trailingPE', 0)
+         pl = info.get('trailingPE', 0)
         pvp = info.get('priceToBook', 0)
         roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
         margem = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
-        dy_raw = info.get('dividendYield', 0)
+        
+        # ============================================
+        # DY CORRIGIDO - Usando trailingAnnualDividendYield (DY real dos últimos 12 meses)
+        # ============================================
+        dy_raw = info.get('trailingAnnualDividendYield', 0)
+        
         if dy_raw is None or dy_raw == 0:
-            dy = 0
-        elif dy_raw > 1:
-            dy = dy_raw
+            # Fallback: tenta o dividendYield normal (forward)
+            dy_raw = info.get('dividendYield', 0)
+            if dy_raw is None or dy_raw == 0:
+                dy = 0
+            elif dy_raw > 1:
+                dy = dy_raw
+            else:
+                dy = dy_raw * 100
         else:
+            # trailingAnnualDividendYield vem em decimal (ex: 0.069 = 6.9%)
             dy = dy_raw * 100
+        
+        # Validação realista (DY máximo ~10% para empresas sólidas)
         if dy > 10 or dy < 0:
             dy = 0
+        
         revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
         debt_to_equity = info.get('debtToEquity', 0)
         if pl < 2 or pl > 15:
