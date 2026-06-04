@@ -278,6 +278,11 @@ def ver_oportunidades():
     return jsonify({"total": len(oportunidades), "oportunidades": oportunidades})
 
 if __name__ == "__main__":
-    thread = threading.Thread(target=monitorar_continuo, daemon=True)
-    thread.start()
+    # Comentado para evitar duplicação com o cron-job.org
+    # O agendamento agora é feito exclusivamente pelo cron-job.org
+    # que chama o endpoint /scan todos os dias às 10:00
+    
+    # thread = threading.Thread(target=monitorar_continuo, daemon=True)
+    # thread.start()
+    
     app.run(host='0.0.0.0', port=8080)
