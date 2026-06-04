@@ -82,6 +82,45 @@ def calcular_indicadores_tecnicos(dados_historicos):
     except:
         return None
 
+def calcular_proximo_suporte(dados_historicos, preco_atual, suporte_atual):
+    """Encontra o próximo suporte abaixo do preço atual (após rompimento)"""
+    try:
+        low = dados_historicos['Low']
+        close = dados_historicos['Close']
+        
+        # Identifica fundos significativos (mínimos locais)
+        niveis_suporte = []
+        
+        # Percorre os dados para encontrar fundos locais
+        for i in range(20, len(low) - 5):
+            if low.iloc[i] < low.iloc[i-1] and low.iloc[i] < low.iloc[i+1] and low.iloc[i] < low.iloc[i-2]:
+                niveis_suporte.append(low.iloc[i])
+        
+        # Adiciona médias móveis como possíveis suportes
+        mm200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else None
+        mm100 = close.rolling(100).mean().iloc[-1] if len(close) >= 100 else None
+        
+        if mm200:
+            niveis_suporte.append(mm200)
+        if mm100:
+            niveis_suporte.append(mm100)
+        
+        # Filtra apenas níveis abaixo do preço atual e diferentes do suporte rompido
+        niveis_validos = []
+        for nivel in niveis_suporte:
+            if nivel < preco_atual and nivel > 0:
+                # Evita duplicatas próximas
+                if not any(abs(nivel - n) < 0.5 for n in niveis_validos):
+                    niveis_validos.append(nivel)
+        
+        if niveis_validos:
+            # Retorna o maior nível abaixo do preço (próximo suporte)
+            return round(max(niveis_validos), 2)
+        
+        return None
+    except:
+        return None
+
 def buscar_acao_completa(ticker, dados_historicos):
     try:
         ticker_yf = f"{ticker}.SA"
@@ -100,7 +139,7 @@ def buscar_acao_completa(ticker, dados_historicos):
         if preco <= 0:
             return None
         
-        # LIQUIDEZ MÉDIA (20 dias) - JÁ IMPLEMENTADO
+        # LIQUIDEZ MÉDIA (20 dias)
         volume_financeiro = (df_acao["Close"].tail(20) * df_acao["Volume"].tail(20)).mean()
         if volume_financeiro < LIQUIDEZ_MINIMA:
             return None
@@ -111,7 +150,7 @@ def buscar_acao_completa(ticker, dados_historicos):
         roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
         margem = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
         
-        # DY CORRIGIDO (trailing) - JÁ IMPLEMENTADO
+        # DY CORRIGIDO (trailing)
         dy_raw = info.get('trailingAnnualDividendYield', 0)
         if dy_raw is None or dy_raw == 0:
             dy_raw = info.get('dividendYield', 0)
@@ -129,9 +168,7 @@ def buscar_acao_completa(ticker, dados_historicos):
         revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
         debt_to_equity = info.get('debtToEquity', 0)
         
-        # ============================================
-        # FILTROS JÁ EXISTENTES (mantidos)
-        # ============================================
+        # FILTROS
         if pl < 2 or pl > 15:
             return None
         if pvp < 0.3 or pvp > 2:
@@ -144,17 +181,10 @@ def buscar_acao_completa(ticker, dados_historicos):
             return None
         if debt_to_equity > 200:
             return None
-        
-        # ============================================
-        # NOVO FILTRO: CRESCIMENTO DE RECEITA POSITIVO
-        # (Apenas ADICIONADO, sem remover nada)
-        # ============================================
         if revenue_growth <= 0:
-            return None  # Exclui empresas com receita encolhendo
+            return None
         
-        # ============================================
-        # SCORE (mantido)
-        # ============================================
+        # SCORE
         score = 0
         if pl < 8:
             score -= 4
@@ -177,27 +207,40 @@ def buscar_acao_completa(ticker, dados_historicos):
         elif dy > 6:
             score -= 1
         if revenue_growth > 10:
-            score -= 1  # Bônus para crescimento forte (mantido)
+            score -= 1
         
         # ============================================
-        # SUPORTE E CLASSIFICAÇÃO (mantidos)
+        # SUPORTE E CLASSIFICAÇÃO MELHORADOS
         # ============================================
         suporte = tecnicos['suporte']
         distancia = tecnicos['dist_suporte']
-        if distancia <= 3:
-            classificacao = "🔴 SUPORTE FORTE - COMPRA IMEDIATA"
-        elif distancia <= 6:
-            classificacao = "🟡 PRÓXIMO SUPORTE - COMPRA PARCIAL"
-        elif distancia <= 10:
-            classificacao = "🟢 ACIMA SUPORTE - AGUARDAR"
+        
+        # Verifica se o preço rompeu o suporte
+        if preco < suporte:
+            # Rompeu suporte - procurar próximo nível
+            proximo_suporte = calcular_proximo_suporte(df_acao, preco, suporte)
+            if proximo_suporte:
+                suporte = proximo_suporte
+                distancia = ((suporte - preco) / preco) * 100
+                classificacao = f"⚠️ SUPORTE ROMPIDO - PRÓXIMO SUPORTE EM R$ {proximo_suporte:.2f}"
+            else:
+                classificacao = "🔴 SUPORTE ROMPIDO - TENDÊNCIA DE BAIXA"
         else:
-            classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
+            # Preço acima do suporte - classificação normal
+            if distancia <= 3:
+                classificacao = "🔴 SUPORTE FORTE - COMPRA IMEDIATA"
+            elif distancia <= 6:
+                classificacao = "🟡 PRÓXIMO SUPORTE - COMPRA PARCIAL"
+            elif distancia <= 10:
+                classificacao = "🟢 ACIMA SUPORTE - AGUARDAR"
+            else:
+                classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
         
         return {
             'ticker': ticker,
             'preco': preco,
             'suporte': suporte,
-            'distancia': distancia,
+            'distancia': round(distancia, 1),
             'classificacao': classificacao,
             'pl': round(pl, 1),
             'pvp': round(pvp, 2),
@@ -241,7 +284,7 @@ def enviar_resumo_diario():
             msg += f"📊 Score: {opp['score']} | P/L: {opp['pl']}x | P/VP: {opp['pvp']}x\n"
             msg += f"💰 DY: {opp['dy']}% | ROE: {opp['roe']}%\n"
             msg += f"🎯 Suporte: R$ {opp['suporte']:.2f}\n"
-            msg += f"📍 Distância: {opp['distancia']:.1f}% acima\n"
+            msg += f"📍 Distância: {opp['distancia']:.1f}% {'acima' if opp['preco'] > opp['suporte'] else 'abaixo'}\n"
             msg += f"⚡ {opp['classificacao']}\n\n"
         msg += f"📌 <i>Top {len(oportunidades)} ações mais baratas</i>"
     else:
