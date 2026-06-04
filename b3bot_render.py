@@ -19,33 +19,27 @@ TOP_OPORTUNIDADES = 10
 LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
 
 # ============================================
-# CACHE LOCAL (para reduzir chamadas ao Yahoo)
+# CACHE LOCAL (NOVO - apenas para acelerar)
 # ============================================
 CACHE_FILE = "acoes_cache.json"
-CACHE_DURATION = 3600  # 1 hora de validade
+CACHE_DURATION = 3600  # 1 hora
 
 def carregar_cache():
-    """Carrega dados do cache local"""
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, 'r') as f:
                 cache = json.load(f)
-                # Verifica se o cache ainda é válido
                 if time.time() - cache.get('timestamp', 0) < CACHE_DURATION:
-                    print("  ✅ Cache carregado")
+                    print("  📦 Cache carregado")
                     return cache.get('dados', {})
         except:
             pass
     return {}
 
 def salvar_cache(dados):
-    """Salva dados no cache local"""
     try:
         with open(CACHE_FILE, 'w') as f:
-            json.dump({
-                'timestamp': time.time(),
-                'dados': dados
-            }, f)
+            json.dump({'timestamp': time.time(), 'dados': dados}, f)
         print("  💾 Cache salvo")
     except:
         pass
@@ -117,13 +111,11 @@ def calcular_indicadores_tecnicos(dados_historicos):
         return None
 
 def calcular_proximo_suporte(dados_historicos, preco_atual, suporte_atual):
-    """Encontra o próximo suporte abaixo do preço atual"""
     try:
         low = dados_historicos['Low']
         close = dados_historicos['Close']
         
         niveis_suporte = []
-        
         for i in range(20, len(low) - 5):
             if low.iloc[i] < low.iloc[i-1] and low.iloc[i] < low.iloc[i+1] and low.iloc[i] < low.iloc[i-2]:
                 niveis_suporte.append(low.iloc[i])
@@ -149,13 +141,11 @@ def calcular_proximo_suporte(dados_historicos, preco_atual, suporte_atual):
         return None
 
 def buscar_acao_completa(ticker, dados_historicos, cache_dados):
-    """Busca dados completos da ação com cache"""
     try:
         ticker_yf = f"{ticker}.SA"
         
-        # Verifica cache
         if ticker in cache_dados:
-            print(f"  📦 Cache para {ticker}")
+            print(f"  📦 Cache: {ticker}")
             return cache_dados[ticker]
         
         try:
@@ -175,33 +165,22 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
         if preco <= 0:
             return None
         
+        # LIQUIDEZ MÉDIA (20 dias)
         volume_financeiro = (df_acao["Close"].tail(20) * df_acao["Volume"].tail(20)).mean()
         if volume_financeiro < LIQUIDEZ_MINIMA:
             return None
         
         info = stock.info
+        
+        # ============================================
+        # INDICADORES JÁ EXISTENTES (mantidos)
+        # ============================================
         pl = info.get('trailingPE', 0)
         pvp = info.get('priceToBook', 0)
         roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
         margem = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
         
-        # ============================================
-        # FLUXO DE CAIXA vs LUCRO (NOVO)
-        # ============================================
-        net_income = info.get('netIncomeToCommon', 0)
-        free_cashflow = info.get('freeCashflow', 0)
-        
-        # Verifica se o lucro é consistente com o fluxo de caixa
-        if net_income > 0 and free_cashflow > 0:
-            fco_vs_lucro = (free_cashflow / net_income) * 100
-            # Se FCO for muito menor que o lucro (< 50%), pode indicar lucro inflado
-            if fco_vs_lucro < 50:
-                print(f"  ⚠️ {ticker}: Fluxo de caixa {fco_vs_lucro:.0f}% do lucro - REPROVADA")
-                return None
-        
-        # ============================================
-        # DY CORRIGIDO (AGORA 15% MÁXIMO)
-        # ============================================
+        # DY (ajustado)
         dy_raw = info.get('trailingAnnualDividendYield', 0)
         if dy_raw is None or dy_raw == 0:
             dy_raw = info.get('dividendYield', 0)
@@ -213,14 +192,51 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
                 dy = dy_raw * 100
         else:
             dy = dy_raw * 100
-        # ALTERADO: DY máximo agora é 15% (antes 10%)
         if dy > 15 or dy < 0:
             dy = 0
         
         revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
         debt_to_equity = info.get('debtToEquity', 0)
         
-        # FILTROS
+        # FLUXO DE CAIXA vs LUCRO (já existente)
+        net_income = info.get('netIncomeToCommon', 0)
+        free_cashflow = info.get('freeCashflow', 0)
+        fco_vs_lucro = None
+        if net_income > 0 and free_cashflow > 0:
+            fco_vs_lucro = (free_cashflow / net_income) * 100
+        
+        # ============================================
+        # NOVAS MELHORIAS (APENAS ADICIONADAS)
+        # ============================================
+        
+        # 1. CRESCIMENTO DO LUCRO (NOVO)
+        earnings_growth = info.get('earningsQuarterlyGrowth', 0) * 100 if info.get('earningsQuarterlyGrowth') else 0
+        
+        # 2. COBERTURA DE JUROS (NOVO)
+        ebit = info.get('ebit', 0)
+        interest_expense = info.get('interestExpense', 1)
+        cobertura_juros = None
+        if interest_expense and interest_expense > 0:
+            cobertura_juros = ebit / interest_expense
+        
+        # 3. ALTMAN Z-SCORE (NOVO - simplificado)
+        ativo_total = info.get('totalAssets', 0)
+        passivo_total = info.get('totalLiabilities', 0)
+        patrimonio = info.get('shareholderEquity', 0)
+        working_capital = info.get('currentAssets', 0) - info.get('currentLiabilities', 0)
+        
+        altman_z = None
+        if ativo_total > 0:
+            A = working_capital / ativo_total if working_capital else 0
+            B = info.get('retainedEarnings', 0) / ativo_total if info.get('retainedEarnings') else 0
+            C = ebit / ativo_total if ebit else 0
+            D = (info.get('marketCap', 0) / passivo_total) if passivo_total > 0 else 0
+            E = info.get('totalRevenue', 0) / ativo_total if info.get('totalRevenue') else 0
+            altman_z = 1.2*A + 1.4*B + 3.3*C + 0.6*D + 1.0*E
+        
+        # ============================================
+        # FILTROS EXISTENTES (mantidos)
+        # ============================================
         if pl < 2 or pl > 15:
             return None
         if pvp < 0.3 or pvp > 2:
@@ -235,8 +251,12 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
             return None
         if revenue_growth <= 0:
             return None
+        if fco_vs_lucro is not None and fco_vs_lucro < 50:
+            return None
         
-        # SCORE
+        # ============================================
+        # SCORE (mantido, com ADIÇÕES)
+        # ============================================
         score = 0
         if pl < 8:
             score -= 4
@@ -261,10 +281,34 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
         if revenue_growth > 10:
             score -= 1
         
-        # SUPORTE E CLASSIFICAÇÃO
+        # NOVAS PENALIDADES NO SCORE (apenas adicionam)
+        if earnings_growth < 0:
+            score += 2  # Penaliza lucro caindo
+        if cobertura_juros is not None and cobertura_juros < 2:
+            score += 2  # Penaliza endividamento alto
+        
+        # ============================================
+        # CLASSIFICAÇÃO (mantida, com ADIÇÕES)
+        # ============================================
         suporte = tecnicos['suporte']
         distancia = tecnicos['dist_suporte']
         
+        alertas = []
+        
+        # Adiciona alertas baseados nos novos indicadores
+        if altman_z is not None:
+            if altman_z < 1.81:
+                alertas.append("⚠️ ALTO RISCO DE FALÊNCIA")
+            elif altman_z < 2.99:
+                alertas.append("🟡 RISCO MODERADO")
+        
+        if earnings_growth < 0:
+            alertas.append("⚠️ LUCRO EM QUEDA")
+        
+        if cobertura_juros is not None and cobertura_juros < 3:
+            alertas.append("⚠️ ENDIVIDAMENTO ALTO")
+        
+        # Classificação original
         if preco < suporte:
             proximo_suporte = calcular_proximo_suporte(df_acao, preco, suporte)
             if proximo_suporte:
@@ -283,6 +327,10 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
             else:
                 classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
         
+        # Adiciona alertas à classificação
+        if alertas:
+            classificacao += " | " + " | ".join(alertas)
+        
         resultado = {
             'ticker': ticker,
             'preco': preco,
@@ -294,13 +342,15 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
             'dy': round(dy, 1),
             'roe': round(roe, 1),
             'score': score,
-            'volume_mm': round(volume_financeiro / 1000000, 1)
+            'volume_mm': round(volume_financeiro / 1000000, 1),
+            'earnings_growth': round(earnings_growth, 1),
+            'cobertura_juros': round(cobertura_juros, 2) if cobertura_juros else None,
+            'altman_z': round(altman_z, 2) if altman_z else None
         }
         
-        # Salva no cache
         cache_dados[ticker] = resultado
-        
         return resultado
+        
     except Exception as e:
         return None
 
@@ -310,7 +360,6 @@ def buscar_oportunidades():
     if not tickers:
         return []
     
-    # Carrega cache
     cache_dados = carregar_cache()
     
     print(f"📊 Analisando {len(tickers)} ações...")
@@ -331,7 +380,6 @@ def buscar_oportunidades():
         if acao and acao['distancia'] <= 15 and acao['score'] <= -5:
             todas_oportunidades.append(acao)
     
-    # Salva cache atualizado
     salvar_cache(cache_dados)
     
     todas_oportunidades.sort(key=lambda x: (x['score'], x['distancia']))
