@@ -6,6 +6,8 @@ import threading
 import pytz
 import requests
 import os
+import json
+from functools import lru_cache
 
 # ============================================
 # CONFIGURAÇÕES
@@ -15,6 +17,38 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5869218072")
 HORARIO_ENVIO = 10
 TOP_OPORTUNIDADES = 10
 LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
+
+# ============================================
+# CACHE LOCAL (para reduzir chamadas ao Yahoo)
+# ============================================
+CACHE_FILE = "acoes_cache.json"
+CACHE_DURATION = 3600  # 1 hora de validade
+
+def carregar_cache():
+    """Carrega dados do cache local"""
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'r') as f:
+                cache = json.load(f)
+                # Verifica se o cache ainda é válido
+                if time.time() - cache.get('timestamp', 0) < CACHE_DURATION:
+                    print("  ✅ Cache carregado")
+                    return cache.get('dados', {})
+        except:
+            pass
+    return {}
+
+def salvar_cache(dados):
+    """Salva dados no cache local"""
+    try:
+        with open(CACHE_FILE, 'w') as f:
+            json.dump({
+                'timestamp': time.time(),
+                'dados': dados
+            }, f)
+        print("  💾 Cache salvo")
+    except:
+        pass
 
 def enviar_telegram(mensagem):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -83,20 +117,17 @@ def calcular_indicadores_tecnicos(dados_historicos):
         return None
 
 def calcular_proximo_suporte(dados_historicos, preco_atual, suporte_atual):
-    """Encontra o próximo suporte abaixo do preço atual (após rompimento)"""
+    """Encontra o próximo suporte abaixo do preço atual"""
     try:
         low = dados_historicos['Low']
         close = dados_historicos['Close']
         
-        # Identifica fundos significativos (mínimos locais)
         niveis_suporte = []
         
-        # Percorre os dados para encontrar fundos locais
         for i in range(20, len(low) - 5):
             if low.iloc[i] < low.iloc[i-1] and low.iloc[i] < low.iloc[i+1] and low.iloc[i] < low.iloc[i-2]:
                 niveis_suporte.append(low.iloc[i])
         
-        # Adiciona médias móveis como possíveis suportes
         mm200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else None
         mm100 = close.rolling(100).mean().iloc[-1] if len(close) >= 100 else None
         
@@ -105,41 +136,45 @@ def calcular_proximo_suporte(dados_historicos, preco_atual, suporte_atual):
         if mm100:
             niveis_suporte.append(mm100)
         
-        # Filtra apenas níveis abaixo do preço atual e diferentes do suporte rompido
         niveis_validos = []
         for nivel in niveis_suporte:
             if nivel < preco_atual and nivel > 0:
-                # Evita duplicatas próximas
                 if not any(abs(nivel - n) < 0.5 for n in niveis_validos):
                     niveis_validos.append(nivel)
         
         if niveis_validos:
-            # Retorna o maior nível abaixo do preço (próximo suporte)
             return round(max(niveis_validos), 2)
-        
         return None
     except:
         return None
 
-def buscar_acao_completa(ticker, dados_historicos):
+def buscar_acao_completa(ticker, dados_historicos, cache_dados):
+    """Busca dados completos da ação com cache"""
     try:
         ticker_yf = f"{ticker}.SA"
+        
+        # Verifica cache
+        if ticker in cache_dados:
+            print(f"  📦 Cache para {ticker}")
+            return cache_dados[ticker]
+        
         try:
             df_acao = dados_historicos[ticker_yf]
         except Exception:
             return None
         if df_acao is None or df_acao.empty:
             return None
+            
         tecnicos = calcular_indicadores_tecnicos(df_acao)
         if not tecnicos:
             return None
+            
         stock = yf.Ticker(ticker_yf)
         fast_info = stock.fast_info
         preco = tecnicos['preco_atual']
         if preco <= 0:
             return None
         
-        # LIQUIDEZ MÉDIA (20 dias)
         volume_financeiro = (df_acao["Close"].tail(20) * df_acao["Volume"].tail(20)).mean()
         if volume_financeiro < LIQUIDEZ_MINIMA:
             return None
@@ -150,7 +185,23 @@ def buscar_acao_completa(ticker, dados_historicos):
         roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
         margem = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
         
-        # DY CORRIGIDO (trailing)
+        # ============================================
+        # FLUXO DE CAIXA vs LUCRO (NOVO)
+        # ============================================
+        net_income = info.get('netIncomeToCommon', 0)
+        free_cashflow = info.get('freeCashflow', 0)
+        
+        # Verifica se o lucro é consistente com o fluxo de caixa
+        if net_income > 0 and free_cashflow > 0:
+            fco_vs_lucro = (free_cashflow / net_income) * 100
+            # Se FCO for muito menor que o lucro (< 50%), pode indicar lucro inflado
+            if fco_vs_lucro < 50:
+                print(f"  ⚠️ {ticker}: Fluxo de caixa {fco_vs_lucro:.0f}% do lucro - REPROVADA")
+                return None
+        
+        # ============================================
+        # DY CORRIGIDO (AGORA 15% MÁXIMO)
+        # ============================================
         dy_raw = info.get('trailingAnnualDividendYield', 0)
         if dy_raw is None or dy_raw == 0:
             dy_raw = info.get('dividendYield', 0)
@@ -162,7 +213,8 @@ def buscar_acao_completa(ticker, dados_historicos):
                 dy = dy_raw * 100
         else:
             dy = dy_raw * 100
-        if dy > 10 or dy < 0:
+        # ALTERADO: DY máximo agora é 15% (antes 10%)
+        if dy > 15 or dy < 0:
             dy = 0
         
         revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
@@ -209,15 +261,11 @@ def buscar_acao_completa(ticker, dados_historicos):
         if revenue_growth > 10:
             score -= 1
         
-        # ============================================
-        # SUPORTE E CLASSIFICAÇÃO MELHORADOS
-        # ============================================
+        # SUPORTE E CLASSIFICAÇÃO
         suporte = tecnicos['suporte']
         distancia = tecnicos['dist_suporte']
         
-        # Verifica se o preço rompeu o suporte
         if preco < suporte:
-            # Rompeu suporte - procurar próximo nível
             proximo_suporte = calcular_proximo_suporte(df_acao, preco, suporte)
             if proximo_suporte:
                 suporte = proximo_suporte
@@ -226,7 +274,6 @@ def buscar_acao_completa(ticker, dados_historicos):
             else:
                 classificacao = "🔴 SUPORTE ROMPIDO - TENDÊNCIA DE BAIXA"
         else:
-            # Preço acima do suporte - classificação normal
             if distancia <= 3:
                 classificacao = "🔴 SUPORTE FORTE - COMPRA IMEDIATA"
             elif distancia <= 6:
@@ -236,7 +283,7 @@ def buscar_acao_completa(ticker, dados_historicos):
             else:
                 classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
         
-        return {
+        resultado = {
             'ticker': ticker,
             'preco': preco,
             'suporte': suporte,
@@ -249,6 +296,11 @@ def buscar_acao_completa(ticker, dados_historicos):
             'score': score,
             'volume_mm': round(volume_financeiro / 1000000, 1)
         }
+        
+        # Salva no cache
+        cache_dados[ticker] = resultado
+        
+        return resultado
     except Exception as e:
         return None
 
@@ -257,19 +309,31 @@ def buscar_oportunidades():
     tickers = buscar_todos_tickers_b3()
     if not tickers:
         return []
+    
+    # Carrega cache
+    cache_dados = carregar_cache()
+    
     print(f"📊 Analisando {len(tickers)} ações...")
     tickers_yf = [f"{t}.SA" for t in tickers]
     dados_historicos = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=60)
+    
     if dados_historicos is None or dados_historicos.empty:
         print("❌ Erro ao baixar dados históricos")
         return []
+    
     todas_oportunidades = []
+    
     for i, ticker in enumerate(tickers):
         if (i+1) % 50 == 0:
             print(f"  Progresso: {i+1}/{len(tickers)}")
-        acao = buscar_acao_completa(ticker, dados_historicos)
+        
+        acao = buscar_acao_completa(ticker, dados_historicos, cache_dados)
         if acao and acao['distancia'] <= 15 and acao['score'] <= -5:
             todas_oportunidades.append(acao)
+    
+    # Salva cache atualizado
+    salvar_cache(cache_dados)
+    
     todas_oportunidades.sort(key=lambda x: (x['score'], x['distancia']))
     return todas_oportunidades[:TOP_OPORTUNIDADES]
 
@@ -322,9 +386,6 @@ def ver_oportunidades():
 
 if __name__ == "__main__":
     # Comentado para evitar duplicação com o cron-job.org
-    # O agendamento agora é feito exclusivamente pelo cron-job.org
-    # que chama o endpoint /scan todos os dias às 10:00
-    
     # thread = threading.Thread(target=monitorar_continuo, daemon=True)
     # thread.start()
     
