@@ -7,7 +7,6 @@ import pytz
 import requests
 import os
 import json
-from functools import lru_cache
 
 # ============================================
 # CONFIGURAÇÕES
@@ -19,7 +18,7 @@ TOP_OPORTUNIDADES = 10
 LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
 
 # ============================================
-# CACHE LOCAL (NOVO - apenas para acelerar)
+# CACHE LOCAL
 # ============================================
 CACHE_FILE = "acoes_cache.json"
 CACHE_DURATION = 3600  # 1 hora
@@ -165,7 +164,6 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
         if preco <= 0:
             return None
         
-        # LIQUIDEZ MÉDIA (20 dias)
         volume_financeiro = (df_acao["Close"].tail(20) * df_acao["Volume"].tail(20)).mean()
         if volume_financeiro < LIQUIDEZ_MINIMA:
             return None
@@ -173,14 +171,14 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
         info = stock.info
         
         # ============================================
-        # INDICADORES JÁ EXISTENTES (mantidos)
+        # INDICADORES BÁSICOS
         # ============================================
         pl = info.get('trailingPE', 0)
         pvp = info.get('priceToBook', 0)
         roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
         margem = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
         
-        # DY (ajustado)
+        # DY
         dy_raw = info.get('trailingAnnualDividendYield', 0)
         if dy_raw is None or dy_raw == 0:
             dy_raw = info.get('dividendYield', 0)
@@ -198,7 +196,7 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
         revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
         debt_to_equity = info.get('debtToEquity', 0)
         
-        # FLUXO DE CAIXA vs LUCRO (já existente)
+        # Fluxo de caixa vs lucro
         net_income = info.get('netIncomeToCommon', 0)
         free_cashflow = info.get('freeCashflow', 0)
         fco_vs_lucro = None
@@ -206,23 +204,19 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
             fco_vs_lucro = (free_cashflow / net_income) * 100
         
         # ============================================
-        # NOVAS MELHORIAS (APENAS ADICIONADAS)
+        # MELHORIAS
         # ============================================
-        
-        # 1. CRESCIMENTO DO LUCRO (NOVO)
         earnings_growth = info.get('earningsQuarterlyGrowth', 0) * 100 if info.get('earningsQuarterlyGrowth') else 0
         
-        # 2. COBERTURA DE JUROS (NOVO)
         ebit = info.get('ebit', 0)
         interest_expense = info.get('interestExpense', 1)
         cobertura_juros = None
         if interest_expense and interest_expense > 0:
             cobertura_juros = ebit / interest_expense
         
-        # 3. ALTMAN Z-SCORE (NOVO - simplificado)
+        # ALTMAN Z-SCORE
         ativo_total = info.get('totalAssets', 0)
         passivo_total = info.get('totalLiabilities', 0)
-        patrimonio = info.get('shareholderEquity', 0)
         working_capital = info.get('currentAssets', 0) - info.get('currentLiabilities', 0)
         
         altman_z = None
@@ -233,6 +227,15 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
             D = (info.get('marketCap', 0) / passivo_total) if passivo_total > 0 else 0
             E = info.get('totalRevenue', 0) / ativo_total if info.get('totalRevenue') else 0
             altman_z = 1.2*A + 1.4*B + 3.3*C + 0.6*D + 1.0*E
+        
+        # ============================================
+        # PRAZO DE ESTOCAGEM (NOVO)
+        # ============================================
+        inventory = info.get('inventory', 0)
+        cost_of_revenue = info.get('costOfRevenue', 0)
+        dias_estoque = None
+        if cost_of_revenue > 0 and inventory > 0:
+            dias_estoque = (inventory / cost_of_revenue) * 365
         
         # ============================================
         # FILTROS EXISTENTES (mantidos)
@@ -255,60 +258,98 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
             return None
         
         # ============================================
-        # SCORE (mantido, com ADIÇÕES)
+        # NOVOS FILTROS (APENAS ADICIONADOS)
         # ============================================
-        score = 0
+        
+        # 1. ALTMAN Z-SCORE como FILTRO (eliminatório)
+        if altman_z is not None and altman_z < 1.81:
+            return None  # Reprova empresas com risco de falência
+        
+        # 2. PRAZO DE ESTOCAGEM (elimina estoque parado)
+        if dias_estoque is not None and dias_estoque > 180:
+            return None  # Mais de 6 meses de estoque parado
+        
+        # ============================================
+        # RANKING PONDERADO (NOVO)
+        # ============================================
+        
+        # Valuation (35%)
+        score_valuation = 0
         if pl < 8:
-            score -= 4
+            score_valuation -= 4
         elif pl < 10:
-            score -= 3
+            score_valuation -= 3
         elif pl < 12:
-            score -= 1
+            score_valuation -= 1
         if pvp < 1:
-            score -= 3
+            score_valuation -= 3
         elif pvp < 1.5:
-            score -= 1
-        if roe > 20:
-            score -= 3
-        elif roe > 15:
-            score -= 2
-        elif roe > 10:
-            score -= 1
-        if dy > 8:
-            score -= 2
-        elif dy > 6:
-            score -= 1
-        if revenue_growth > 10:
-            score -= 1
+            score_valuation -= 1
         
-        # NOVAS PENALIDADES NO SCORE (apenas adicionam)
-        if earnings_growth < 0:
-            score += 2  # Penaliza lucro caindo
-        if cobertura_juros is not None and cobertura_juros < 2:
-            score += 2  # Penaliza endividamento alto
+        # Rentabilidade (25%)
+        score_rentabilidade = 0
+        if roe > 20:
+            score_rentabilidade -= 3
+        elif roe > 15:
+            score_rentabilidade -= 2
+        elif roe > 10:
+            score_rentabilidade -= 1
+        
+        # Crescimento (20%)
+        score_crescimento = 0
+        if revenue_growth > 10:
+            score_crescimento -= 2
+        if earnings_growth > 10:
+            score_crescimento -= 1
+        elif earnings_growth < 0:
+            score_crescimento += 1
+        
+        # Caixa (10%)
+        score_caixa = 0
+        if fco_vs_lucro is not None:
+            if fco_vs_lucro > 80:
+                score_caixa -= 2
+            elif fco_vs_lucro > 50:
+                score_caixa -= 1
+        
+        # Risco (10%)
+        score_risco = 0
+        if altman_z is not None:
+            if altman_z < 2.99:
+                score_risco += 2
+        if cobertura_juros is not None and cobertura_juros < 3:
+            score_risco += 1
+        if dias_estoque is not None and dias_estoque > 120:
+            score_risco += 1
+        
+        # Score total (ponderado)
+        score = int((
+            score_valuation * 0.35 +
+            score_rentabilidade * 0.25 +
+            score_crescimento * 0.20 +
+            score_caixa * 0.10 +
+            score_risco * 0.10
+        ) * 10)
         
         # ============================================
-        # CLASSIFICAÇÃO (mantida, com ADIÇÕES)
+        # CLASSIFICAÇÃO
         # ============================================
         suporte = tecnicos['suporte']
         distancia = tecnicos['dist_suporte']
         
         alertas = []
         
-        # Adiciona alertas baseados nos novos indicadores
         if altman_z is not None:
-            if altman_z < 1.81:
-                alertas.append("⚠️ ALTO RISCO DE FALÊNCIA")
-            elif altman_z < 2.99:
-                alertas.append("🟡 RISCO MODERADO")
-        
-        if earnings_growth < 0:
-            alertas.append("⚠️ LUCRO EM QUEDA")
+            if altman_z < 2.99:
+                alertas.append(f"🟡 Z-Score: {altman_z:.2f}")
         
         if cobertura_juros is not None and cobertura_juros < 3:
-            alertas.append("⚠️ ENDIVIDAMENTO ALTO")
+            alertas.append(f"⚠️ Juros: {cobertura_juros:.1f}x")
         
-        # Classificação original
+        if dias_estoque is not None:
+            if dias_estoque > 120:
+                alertas.append(f"⚠️ Estoque: {dias_estoque:.0f}d")
+        
         if preco < suporte:
             proximo_suporte = calcular_proximo_suporte(df_acao, preco, suporte)
             if proximo_suporte:
@@ -327,7 +368,6 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
             else:
                 classificacao = "🔵 LONGE DO SUPORTE - MONITORAR"
         
-        # Adiciona alertas à classificação
         if alertas:
             classificacao += " | " + " | ".join(alertas)
         
@@ -343,8 +383,6 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
             'roe': round(roe, 1),
             'score': score,
             'volume_mm': round(volume_financeiro / 1000000, 1),
-            'earnings_growth': round(earnings_growth, 1),
-            'cobertura_juros': round(cobertura_juros, 2) if cobertura_juros else None,
             'altman_z': round(altman_z, 2) if altman_z else None
         }
         
@@ -397,6 +435,8 @@ def enviar_resumo_diario():
             msg += f"💰 DY: {opp['dy']}% | ROE: {opp['roe']}%\n"
             msg += f"🎯 Suporte: R$ {opp['suporte']:.2f}\n"
             msg += f"📍 Distância: {opp['distancia']:.1f}% {'acima' if opp['preco'] > opp['suporte'] else 'abaixo'}\n"
+            if opp.get('altman_z'):
+                msg += f"📊 Altman Z-Score: {opp['altman_z']:.2f}\n"
             msg += f"⚡ {opp['classificacao']}\n\n"
         msg += f"📌 <i>Top {len(oportunidades)} ações mais baratas</i>"
     else:
