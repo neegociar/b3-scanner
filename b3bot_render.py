@@ -424,6 +424,16 @@ def buscar_oportunidades():
     return todas_oportunidades[:TOP_OPORTUNIDADES]
 
 def enviar_resumo_diario():
+    # ============================================
+    # AQUECIMENTO: Garante que o servidor está pronto
+    # ============================================
+    print("🚀 Servidor acordado. Aguardando 10 segundos para estabilizar...")
+    time.sleep(10)  # Aguarda o servidor estabilizar completamente
+    print("🟢 Continuando com o scan...")
+    
+    # ============================================
+    # SCAN NORMAL (seu código original)
+    # ============================================
     oportunidades = buscar_oportunidades()
     msg = f"📊 <b>RESUMO DIÁRIO - {datetime.now().strftime('%d/%m/%Y')}</b>\n\n"
     if oportunidades:
