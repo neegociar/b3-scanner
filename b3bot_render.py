@@ -7,6 +7,7 @@ import pytz
 import requests
 import os
 import json
+import pickle
 
 # ============================================
 # CONFIGURAÇÕES
@@ -18,10 +19,16 @@ TOP_OPORTUNIDADES = 10
 LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
 
 # ============================================
-# CACHE LOCAL
+# CACHE LOCAL (RESULTADOS INDIVIDUAIS)
 # ============================================
 CACHE_FILE = "acoes_cache.json"
 CACHE_DURATION = 3600  # 1 hora
+
+# ============================================
+# CACHE DE DADOS HISTÓRICOS (PREÇOS E VOLUMES)
+# ============================================
+CACHE_HISTORICO_FILE = "dados_historicos.pkl"
+CACHE_HISTORICO_DURATION = 21600  # 6 horas
 
 def carregar_cache():
     if os.path.exists(CACHE_FILE):
@@ -392,20 +399,57 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
     except Exception as e:
         return None
 
+def carregar_dados_historicos(tickers_yf):
+    """Carrega dados históricos com cache em disco"""
+    # Verifica se o cache existe e é recente
+    if os.path.exists(CACHE_HISTORICO_FILE):
+        mod_time = os.path.getmtime(CACHE_HISTORICO_FILE)
+        if time.time() - mod_time < CACHE_HISTORICO_DURATION:
+            print("  📦 Cache histórico encontrado (válido)")
+            try:
+                with open(CACHE_HISTORICO_FILE, 'rb') as f:
+                    import pickle
+                    dados = pickle.load(f)
+                    return dados
+            except:
+                pass
+    
+    # Se não há cache válido, baixa os dados
+    print("  📡 Baixando dados históricos (pode levar alguns minutos)...")
+    dados = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=120)
+    
+    # Salva em cache
+    try:
+        with open(CACHE_HISTORICO_FILE, 'wb') as f:
+            import pickle
+            pickle.dump(dados, f)
+        print("  💾 Histórico salvo em cache")
+    except:
+        pass
+    
+    return dados
+
 def buscar_oportunidades():
     print(f"[{datetime.now()}] Buscando tickers...")
     tickers = buscar_todos_tickers_b3()
     if not tickers:
         return []
     
-    cache_dados = carregar_cache()
+    # Carrega fundamentos do Fundamentus (já com cache)
+    df_fund = buscar_dados_fundamentus()
+    if df_fund is None:
+        print("❌ Erro ao carregar Fundamentus")
+        return []
+    
+    cache_dados = carregar_cache()  # cache dos resultados individuais
     
     print(f"📊 Analisando {len(tickers)} ações...")
     tickers_yf = [f"{t}.SA" for t in tickers]
-    dados_historicos = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=60)
     
+    # Usa cache histórico para dados de preço/volume
+    dados_historicos = carregar_dados_historicos(tickers_yf)
     if dados_historicos is None or dados_historicos.empty:
-        print("❌ Erro ao baixar dados históricos")
+        print("❌ Erro ao carregar dados históricos")
         return []
     
     todas_oportunidades = []
@@ -414,7 +458,7 @@ def buscar_oportunidades():
         if (i+1) % 50 == 0:
             print(f"  Progresso: {i+1}/{len(tickers)}")
         
-        acao = buscar_acao_completa(ticker, dados_historicos, cache_dados)
+        acao = buscar_acao_completa(ticker, dados_historicos, cache_dados, df_fund)
         if acao and acao['distancia'] <= 15 and acao['score'] <= -5:
             todas_oportunidades.append(acao)
     
@@ -422,37 +466,6 @@ def buscar_oportunidades():
     
     todas_oportunidades.sort(key=lambda x: (x['score'], x['distancia']))
     return todas_oportunidades[:TOP_OPORTUNIDADES]
-
-def enviar_resumo_diario():
-    # ============================================
-    # AQUECIMENTO: Garante que o servidor está pronto
-    # ============================================
-    print("🚀 Servidor acordado. Aguardando 10 segundos para estabilizar...")
-    time.sleep(10)  # Aguarda o servidor estabilizar completamente
-    print("🟢 Continuando com o scan...")
-    
-    # ============================================
-    # SCAN NORMAL (seu código original)
-    # ============================================
-    oportunidades = buscar_oportunidades()
-    msg = f"📊 <b>RESUMO DIÁRIO - {datetime.now().strftime('%d/%m/%Y')}</b>\n\n"
-    if oportunidades:
-        msg += f"🐋 <b>OPORTUNIDADES ({len(oportunidades)})</b>\n\n"
-        for i, opp in enumerate(oportunidades, 1):
-            msg += f"<b>{i}. {opp['ticker']}</b>\n"
-            msg += f"💰 Preço: R$ {opp['preco']:.2f}\n"
-            msg += f"📊 Score: {opp['score']} | P/L: {opp['pl']}x | P/VP: {opp['pvp']}x\n"
-            msg += f"💰 DY: {opp['dy']}% | ROE: {opp['roe']}%\n"
-            msg += f"🎯 Suporte: R$ {opp['suporte']:.2f}\n"
-            msg += f"📍 Distância: {opp['distancia']:.1f}% {'acima' if opp['preco'] > opp['suporte'] else 'abaixo'}\n"
-            if opp.get('altman_z'):
-                msg += f"📊 Altman Z-Score: {opp['altman_z']:.2f}\n"
-            msg += f"⚡ {opp['classificacao']}\n\n"
-        msg += f"📌 <i>Top {len(oportunidades)} ações mais baratas</i>"
-    else:
-        msg += f"✅ Nenhuma oportunidade encontrada hoje."
-    enviar_telegram(msg)
-    return oportunidades
 
 def monitorar_continuo():
     fuso_sp = pytz.timezone('America/Sao_Paulo')
