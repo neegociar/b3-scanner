@@ -7,7 +7,6 @@ import pytz
 import requests
 import os
 import json
-import pickle
 
 # ============================================
 # CONFIGURAÇÕES
@@ -16,13 +15,13 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5869218072")
 HORARIO_ENVIO = 10
 TOP_OPORTUNIDADES = 10
-LIQUIDEZ_MINIMA = 1000000
+LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
 
 # ============================================
 # CACHE LOCAL
 # ============================================
 CACHE_FILE = "acoes_cache.json"
-CACHE_DURATION = 3600
+CACHE_DURATION = 3600  # 1 hora
 
 def carregar_cache():
     if os.path.exists(CACHE_FILE):
@@ -43,36 +42,6 @@ def salvar_cache(dados):
         print("  💾 Cache salvo")
     except:
         pass
-
-# ============================================
-# CACHE DE DADOS HISTÓRICOS (PREÇOS E VOLUMES)
-# ============================================
-CACHE_HISTORICO_FILE = "dados_historicos.pkl"
-CACHE_HISTORICO_DURATION = 21600  # 6 horas
-
-def carregar_dados_historicos(tickers_yf):
-    if os.path.exists(CACHE_HISTORICO_FILE):
-        mod_time = os.path.getmtime(CACHE_HISTORICO_FILE)
-        if time.time() - mod_time < CACHE_HISTORICO_DURATION:
-            print("  📦 Cache histórico encontrado (válido)")
-            try:
-                with open(CACHE_HISTORICO_FILE, 'rb') as f:
-                    dados = pickle.load(f)
-                    return dados
-            except:
-                pass
-    
-    print("  📡 Baixando dados históricos (pode levar alguns minutos)...")
-    dados = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=120)
-    
-    try:
-        with open(CACHE_HISTORICO_FILE, 'wb') as f:
-            pickle.dump(dados, f)
-        print("  💾 Histórico salvo em cache")
-    except:
-        pass
-    
-    return dados
 
 # ============================================
 # TELEGRAM
@@ -183,19 +152,23 @@ def calcular_proximo_suporte(dados_historicos, preco_atual, suporte_atual):
 # FUNDAMENTUS (FONTE PRINCIPAL PARA FUNDAMENTOS)
 # ============================================
 def extrair_valor_fundamentus(valor_str):
+    """Converte string do Fundamentus para float"""
     if pd.isna(valor_str) or valor_str == '-' or valor_str == '':
         return 0.0
     if isinstance(valor_str, (int, float)):
         return float(valor_str)
+    
     valor_str = str(valor_str).strip()
     if valor_str.endswith('%'):
         valor_str = valor_str[:-1]
+    
     if ',' in valor_str and '.' in valor_str:
         valor_str = valor_str.replace('.', '').replace(',', '.')
     elif ',' in valor_str:
         valor_str = valor_str.replace(',', '.')
     elif '.' in valor_str and len(valor_str.split('.')[-1]) != 2:
         valor_str = valor_str.replace('.', '')
+    
     try:
         return float(valor_str)
     except:
@@ -208,22 +181,27 @@ CACHE_FUNDAMENTUS_DURATION = 3600
 def buscar_dados_fundamentus():
     global cache_fundamentus, cache_fundamentus_timestamp
     agora = time.time()
+    
     if cache_fundamentus is not None and (agora - cache_fundamentus_timestamp) < CACHE_FUNDAMENTUS_DURATION:
         print("  📦 Fundamentus cacheado")
         return cache_fundamentus
+    
     try:
         url = "https://fundamentus.com.br/resultado.php"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(url, headers=headers, timeout=30)
         dfs = pd.read_html(response.text)
+        
         df_fund = None
         for df in dfs:
             if 'Papel' in df.columns:
                 df_fund = df
                 break
+        
         if df_fund is None:
             print("  ⚠️ Tabela do Fundamentus não encontrada")
             return None
+        
         df_fund = df_fund.rename(columns={
             'Papel': 'ticker',
             'P/L': 'pl',
@@ -233,10 +211,12 @@ def buscar_dados_fundamentus():
             'Mrg. Líq.': 'margem',
             'Cres. Rec.5a': 'crescimento_receita'
         })
+        
         cache_fundamentus = df_fund
         cache_fundamentus_timestamp = agora
         print(f"  ✅ Fundamentus carregado: {len(df_fund)} ações")
         return df_fund
+        
     except Exception as e:
         print(f"  ❌ Erro ao carregar Fundamentus: {e}")
         return None
@@ -245,9 +225,11 @@ def buscar_fundamentos_acao(ticker, df_fund):
     try:
         if df_fund is None or df_fund.empty:
             return None
+        
         linha = df_fund[df_fund['ticker'].astype(str).str.upper() == ticker]
         if linha.empty:
             return None
+        
         return {
             'pl': extrair_valor_fundamentus(linha['pl'].iloc[0]),
             'pvp': extrair_valor_fundamentus(linha['pvp'].iloc[0]),
@@ -333,7 +315,7 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados, df_fund):
             cobertura_juros = ebit / interest_expense
         
         # ============================================
-        # INDICADORES DO FUNDAMENTUS
+        # INDICADORES DO FUNDAMENTUS (NOVO)
         # ============================================
         fundamentos = buscar_fundamentos_acao(ticker, df_fund)
         if fundamentos is None:
@@ -371,7 +353,7 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados, df_fund):
             return None
         
         # ============================================
-        # RANKING PONDERADO (COMPLETO)
+        # RANKING PONDERADO
         # ============================================
         score_valuation = 0
         if pl < 8:
@@ -502,10 +484,10 @@ def buscar_oportunidades():
     
     print(f"📊 Analisando {len(tickers)} ações...")
     tickers_yf = [f"{t}.SA" for t in tickers]
-    dados_historicos = carregar_dados_historicos(tickers_yf)
+    dados_historicos = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=60)
     
     if dados_historicos is None or dados_historicos.empty:
-        print("❌ Erro ao carregar dados históricos")
+        print("❌ Erro ao baixar dados históricos")
         return []
     
     todas_oportunidades = []
@@ -552,6 +534,20 @@ def enviar_resumo_diario():
     return oportunidades
 
 # ============================================
+# MONITORAMENTO CONTÍNUO (DESATIVADO)
+# ============================================
+def monitorar_continuo():
+    fuso_sp = pytz.timezone('America/Sao_Paulo')
+    print(f"\n🤖 SCANNER B3 INICIADO")
+    print(f"⏰ Envio programado para às {HORARIO_ENVIO}:00\n")
+    while True:
+        now = datetime.now(fuso_sp)
+        if now.hour == HORARIO_ENVIO and now.minute < 5:
+            enviar_resumo_diario()
+            time.sleep(60)
+        time.sleep(30)
+
+# ============================================
 # SERVIDOR FLASK
 # ============================================
 from flask import Flask, jsonify
@@ -575,6 +571,8 @@ def ver_oportunidades():
 # EXECUÇÃO PRINCIPAL
 # ============================================
 if __name__ == "__main__":
+    # Comentado para evitar duplicação com o cron-job.org
     # thread = threading.Thread(target=monitorar_continuo, daemon=True)
     # thread.start()
+    
     app.run(host='0.0.0.0', port=8080)
