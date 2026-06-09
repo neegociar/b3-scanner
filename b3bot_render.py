@@ -16,19 +16,13 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8207229215:AAGNJfXhQm2Xmqzv6XQ8pZ_
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5869218072")
 HORARIO_ENVIO = 10
 TOP_OPORTUNIDADES = 10
-LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
+LIQUIDEZ_MINIMA = 1000000
 
 # ============================================
-# CACHE LOCAL (RESULTADOS INDIVIDUAIS)
+# CACHE LOCAL
 # ============================================
 CACHE_FILE = "acoes_cache.json"
-CACHE_DURATION = 3600  # 1 hora
-
-# ============================================
-# CACHE DE DADOS HISTÓRICOS (PREÇOS E VOLUMES)
-# ============================================
-CACHE_HISTORICO_FILE = "dados_historicos.pkl"
-CACHE_HISTORICO_DURATION = 21600  # 6 horas
+CACHE_DURATION = 3600
 
 def carregar_cache():
     if os.path.exists(CACHE_FILE):
@@ -50,6 +44,39 @@ def salvar_cache(dados):
     except:
         pass
 
+# ============================================
+# CACHE DE DADOS HISTÓRICOS (PREÇOS E VOLUMES)
+# ============================================
+CACHE_HISTORICO_FILE = "dados_historicos.pkl"
+CACHE_HISTORICO_DURATION = 21600  # 6 horas
+
+def carregar_dados_historicos(tickers_yf):
+    if os.path.exists(CACHE_HISTORICO_FILE):
+        mod_time = os.path.getmtime(CACHE_HISTORICO_FILE)
+        if time.time() - mod_time < CACHE_HISTORICO_DURATION:
+            print("  📦 Cache histórico encontrado (válido)")
+            try:
+                with open(CACHE_HISTORICO_FILE, 'rb') as f:
+                    dados = pickle.load(f)
+                    return dados
+            except:
+                pass
+    
+    print("  📡 Baixando dados históricos (pode levar alguns minutos)...")
+    dados = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=120)
+    
+    try:
+        with open(CACHE_HISTORICO_FILE, 'wb') as f:
+            pickle.dump(dados, f)
+        print("  💾 Histórico salvo em cache")
+    except:
+        pass
+    
+    return dados
+
+# ============================================
+# TELEGRAM
+# ============================================
 def enviar_telegram(mensagem):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print("⚠️ Telegram não configurado")
@@ -62,6 +89,9 @@ def enviar_telegram(mensagem):
     except:
         return False
 
+# ============================================
+# BUSCA TICKERS B3
+# ============================================
 def buscar_todos_tickers_b3():
     tickers = []
     try:
@@ -84,6 +114,9 @@ def buscar_todos_tickers_b3():
 
     return ["PETR4", "VALE3", "ITUB4", "BBDC4", "ABEV3", "BBAS3", "WEGE3", "ITSA4"]
 
+# ============================================
+# INDICADORES TÉCNICOS (YAHOO)
+# ============================================
 def calcular_indicadores_tecnicos(dados_historicos):
     if dados_historicos.empty or len(dados_historicos) < 30:
         return None
@@ -146,7 +179,90 @@ def calcular_proximo_suporte(dados_historicos, preco_atual, suporte_atual):
     except:
         return None
 
-def buscar_acao_completa(ticker, dados_historicos, cache_dados):
+# ============================================
+# FUNDAMENTUS (FONTE PRINCIPAL PARA FUNDAMENTOS)
+# ============================================
+def extrair_valor_fundamentus(valor_str):
+    if pd.isna(valor_str) or valor_str == '-' or valor_str == '':
+        return 0.0
+    if isinstance(valor_str, (int, float)):
+        return float(valor_str)
+    valor_str = str(valor_str).strip()
+    if valor_str.endswith('%'):
+        valor_str = valor_str[:-1]
+    if ',' in valor_str and '.' in valor_str:
+        valor_str = valor_str.replace('.', '').replace(',', '.')
+    elif ',' in valor_str:
+        valor_str = valor_str.replace(',', '.')
+    elif '.' in valor_str and len(valor_str.split('.')[-1]) != 2:
+        valor_str = valor_str.replace('.', '')
+    try:
+        return float(valor_str)
+    except:
+        return 0.0
+
+cache_fundamentus = None
+cache_fundamentus_timestamp = 0
+CACHE_FUNDAMENTUS_DURATION = 3600
+
+def buscar_dados_fundamentus():
+    global cache_fundamentus, cache_fundamentus_timestamp
+    agora = time.time()
+    if cache_fundamentus is not None and (agora - cache_fundamentus_timestamp) < CACHE_FUNDAMENTUS_DURATION:
+        print("  📦 Fundamentus cacheado")
+        return cache_fundamentus
+    try:
+        url = "https://fundamentus.com.br/resultado.php"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=30)
+        dfs = pd.read_html(response.text)
+        df_fund = None
+        for df in dfs:
+            if 'Papel' in df.columns:
+                df_fund = df
+                break
+        if df_fund is None:
+            print("  ⚠️ Tabela do Fundamentus não encontrada")
+            return None
+        df_fund = df_fund.rename(columns={
+            'Papel': 'ticker',
+            'P/L': 'pl',
+            'P/VP': 'pvp',
+            'Div.Yield': 'dy',
+            'ROE': 'roe',
+            'Mrg. Líq.': 'margem',
+            'Cres. Rec.5a': 'crescimento_receita'
+        })
+        cache_fundamentus = df_fund
+        cache_fundamentus_timestamp = agora
+        print(f"  ✅ Fundamentus carregado: {len(df_fund)} ações")
+        return df_fund
+    except Exception as e:
+        print(f"  ❌ Erro ao carregar Fundamentus: {e}")
+        return None
+
+def buscar_fundamentos_acao(ticker, df_fund):
+    try:
+        if df_fund is None or df_fund.empty:
+            return None
+        linha = df_fund[df_fund['ticker'].astype(str).str.upper() == ticker]
+        if linha.empty:
+            return None
+        return {
+            'pl': extrair_valor_fundamentus(linha['pl'].iloc[0]),
+            'pvp': extrair_valor_fundamentus(linha['pvp'].iloc[0]),
+            'dy': extrair_valor_fundamentus(linha['dy'].iloc[0]),
+            'roe': extrair_valor_fundamentus(linha['roe'].iloc[0]),
+            'margem': extrair_valor_fundamentus(linha['margem'].iloc[0]),
+            'crescimento_receita': extrair_valor_fundamentus(linha['crescimento_receita'].iloc[0])
+        }
+    except Exception as e:
+        return None
+
+# ============================================
+# ANÁLISE COMPLETA DA AÇÃO
+# ============================================
+def buscar_acao_completa(ticker, dados_historicos, cache_dados, df_fund):
     try:
         ticker_yf = f"{ticker}.SA"
         
@@ -177,49 +293,13 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
         
         info = stock.info
         
-        # ============================================
-        # INDICADORES BÁSICOS
-        # ============================================
-        pl = info.get('trailingPE', 0)
-        pvp = info.get('priceToBook', 0)
-        roe = info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0
-        margem = info.get('profitMargins', 0) * 100 if info.get('profitMargins') else 0
-        
-        # DY
-        dy_raw = info.get('trailingAnnualDividendYield', 0)
-        if dy_raw is None or dy_raw == 0:
-            dy_raw = info.get('dividendYield', 0)
-            if dy_raw is None or dy_raw == 0:
-                dy = 0
-            elif dy_raw > 1:
-                dy = dy_raw
-            else:
-                dy = dy_raw * 100
-        else:
-            dy = dy_raw * 100
-        if dy > 15 or dy < 0:
-            dy = 0
-        
-        revenue_growth = info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else 0
+        # INDICADORES DO YAHOO (técnicos e risco)
         debt_to_equity = info.get('debtToEquity', 0)
-        
-        # Fluxo de caixa vs lucro
         net_income = info.get('netIncomeToCommon', 0)
         free_cashflow = info.get('freeCashflow', 0)
-        fco_vs_lucro = None
-        if net_income > 0 and free_cashflow > 0:
-            fco_vs_lucro = (free_cashflow / net_income) * 100
-        
-        # ============================================
-        # MELHORIAS
-        # ============================================
         earnings_growth = info.get('earningsQuarterlyGrowth', 0) * 100 if info.get('earningsQuarterlyGrowth') else 0
-        
         ebit = info.get('ebit', 0)
         interest_expense = info.get('interestExpense', 1)
-        cobertura_juros = None
-        if interest_expense and interest_expense > 0:
-            cobertura_juros = ebit / interest_expense
         
         # ALTMAN Z-SCORE
         ativo_total = info.get('totalAssets', 0)
@@ -235,17 +315,39 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
             E = info.get('totalRevenue', 0) / ativo_total if info.get('totalRevenue') else 0
             altman_z = 1.2*A + 1.4*B + 3.3*C + 0.6*D + 1.0*E
         
-        # ============================================
-        # PRAZO DE ESTOCAGEM (NOVO)
-        # ============================================
+        # PRAZO DE ESTOCAGEM
         inventory = info.get('inventory', 0)
         cost_of_revenue = info.get('costOfRevenue', 0)
         dias_estoque = None
         if cost_of_revenue > 0 and inventory > 0:
             dias_estoque = (inventory / cost_of_revenue) * 365
         
+        # FLUXO DE CAIXA VS LUCRO
+        fco_vs_lucro = None
+        if net_income > 0 and free_cashflow > 0:
+            fco_vs_lucro = (free_cashflow / net_income) * 100
+        
+        # COBERTURA DE JUROS
+        cobertura_juros = None
+        if interest_expense and interest_expense > 0:
+            cobertura_juros = ebit / interest_expense
+        
         # ============================================
-        # FILTROS EXISTENTES (mantidos)
+        # INDICADORES DO FUNDAMENTUS
+        # ============================================
+        fundamentos = buscar_fundamentos_acao(ticker, df_fund)
+        if fundamentos is None:
+            return None
+        
+        pl = fundamentos['pl']
+        pvp = fundamentos['pvp']
+        dy = fundamentos['dy']
+        roe = fundamentos['roe']
+        margem = fundamentos['margem']
+        revenue_growth = fundamentos['crescimento_receita']
+        
+        # ============================================
+        # FILTROS
         # ============================================
         if pl < 2 or pl > 15:
             return None
@@ -263,24 +365,14 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
             return None
         if fco_vs_lucro is not None and fco_vs_lucro < 50:
             return None
-        
-        # ============================================
-        # NOVOS FILTROS (APENAS ADICIONADOS)
-        # ============================================
-        
-        # 1. ALTMAN Z-SCORE como FILTRO (eliminatório)
         if altman_z is not None and altman_z < 1.81:
-            return None  # Reprova empresas com risco de falência
-        
-        # 2. PRAZO DE ESTOCAGEM (elimina estoque parado)
+            return None
         if dias_estoque is not None and dias_estoque > 180:
-            return None  # Mais de 6 meses de estoque parado
+            return None
         
         # ============================================
-        # RANKING PONDERADO (NOVO)
+        # RANKING PONDERADO (COMPLETO)
         # ============================================
-        
-        # Valuation (35%)
         score_valuation = 0
         if pl < 8:
             score_valuation -= 4
@@ -293,7 +385,6 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
         elif pvp < 1.5:
             score_valuation -= 1
         
-        # Rentabilidade (25%)
         score_rentabilidade = 0
         if roe > 20:
             score_rentabilidade -= 3
@@ -302,7 +393,6 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
         elif roe > 10:
             score_rentabilidade -= 1
         
-        # Crescimento (20%)
         score_crescimento = 0
         if revenue_growth > 10:
             score_crescimento -= 2
@@ -311,7 +401,6 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
         elif earnings_growth < 0:
             score_crescimento += 1
         
-        # Caixa (10%)
         score_caixa = 0
         if fco_vs_lucro is not None:
             if fco_vs_lucro > 80:
@@ -319,7 +408,6 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
             elif fco_vs_lucro > 50:
                 score_caixa -= 1
         
-        # Risco (10%)
         score_risco = 0
         if altman_z is not None:
             if altman_z < 2.99:
@@ -329,7 +417,6 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
         if dias_estoque is not None and dias_estoque > 120:
             score_risco += 1
         
-        # Score total (ponderado)
         score = int((
             score_valuation * 0.35 +
             score_rentabilidade * 0.25 +
@@ -346,16 +433,14 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
         
         alertas = []
         
-        if altman_z is not None:
-            if altman_z < 2.99:
-                alertas.append(f"🟡 Z-Score: {altman_z:.2f}")
+        if altman_z is not None and altman_z < 2.99:
+            alertas.append(f"🟡 Z-Score: {altman_z:.2f}")
         
         if cobertura_juros is not None and cobertura_juros < 3:
             alertas.append(f"⚠️ Juros: {cobertura_juros:.1f}x")
         
-        if dias_estoque is not None:
-            if dias_estoque > 120:
-                alertas.append(f"⚠️ Estoque: {dias_estoque:.0f}d")
+        if dias_estoque is not None and dias_estoque > 120:
+            alertas.append(f"⚠️ Estoque: {dias_estoque:.0f}d")
         
         if preco < suporte:
             proximo_suporte = calcular_proximo_suporte(df_acao, preco, suporte)
@@ -399,55 +484,26 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados):
     except Exception as e:
         return None
 
-def carregar_dados_historicos(tickers_yf):
-    """Carrega dados históricos com cache em disco"""
-    # Verifica se o cache existe e é recente
-    if os.path.exists(CACHE_HISTORICO_FILE):
-        mod_time = os.path.getmtime(CACHE_HISTORICO_FILE)
-        if time.time() - mod_time < CACHE_HISTORICO_DURATION:
-            print("  📦 Cache histórico encontrado (válido)")
-            try:
-                with open(CACHE_HISTORICO_FILE, 'rb') as f:
-                    import pickle
-                    dados = pickle.load(f)
-                    return dados
-            except:
-                pass
-    
-    # Se não há cache válido, baixa os dados
-    print("  📡 Baixando dados históricos (pode levar alguns minutos)...")
-    dados = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=120)
-    
-    # Salva em cache
-    try:
-        with open(CACHE_HISTORICO_FILE, 'wb') as f:
-            import pickle
-            pickle.dump(dados, f)
-        print("  💾 Histórico salvo em cache")
-    except:
-        pass
-    
-    return dados
-
+# ============================================
+# BUSCAR OPORTUNIDADES
+# ============================================
 def buscar_oportunidades():
     print(f"[{datetime.now()}] Buscando tickers...")
     tickers = buscar_todos_tickers_b3()
     if not tickers:
         return []
     
-    # Carrega fundamentos do Fundamentus (já com cache)
     df_fund = buscar_dados_fundamentus()
     if df_fund is None:
         print("❌ Erro ao carregar Fundamentus")
         return []
     
-    cache_dados = carregar_cache()  # cache dos resultados individuais
+    cache_dados = carregar_cache()
     
     print(f"📊 Analisando {len(tickers)} ações...")
     tickers_yf = [f"{t}.SA" for t in tickers]
-    
-    # Usa cache histórico para dados de preço/volume
     dados_historicos = carregar_dados_historicos(tickers_yf)
+    
     if dados_historicos is None or dados_historicos.empty:
         print("❌ Erro ao carregar dados históricos")
         return []
@@ -467,17 +523,37 @@ def buscar_oportunidades():
     todas_oportunidades.sort(key=lambda x: (x['score'], x['distancia']))
     return todas_oportunidades[:TOP_OPORTUNIDADES]
 
-def monitorar_continuo():
-    fuso_sp = pytz.timezone('America/Sao_Paulo')
-    print(f"\n🤖 SCANNER B3 INICIADO")
-    print(f"⏰ Envio programado para às {HORARIO_ENVIO}:00\n")
-    while True:
-        now = datetime.now(fuso_sp)
-        if now.hour == HORARIO_ENVIO and now.minute < 5:
-            enviar_resumo_diario()
-            time.sleep(60)
-        time.sleep(30)
+# ============================================
+# ENVIAR RESUMO DIÁRIO
+# ============================================
+def enviar_resumo_diario():
+    print("🚀 Servidor acordado. Aguardando 10 segundos para estabilizar...")
+    time.sleep(10)
+    print("🟢 Continuando com o scan...")
+    
+    oportunidades = buscar_oportunidades()
+    msg = f"📊 <b>RESUMO DIÁRIO - {datetime.now().strftime('%d/%m/%Y')}</b>\n\n"
+    if oportunidades:
+        msg += f"🐋 <b>OPORTUNIDADES ({len(oportunidades)})</b>\n\n"
+        for i, opp in enumerate(oportunidades, 1):
+            msg += f"<b>{i}. {opp['ticker']}</b>\n"
+            msg += f"💰 Preço: R$ {opp['preco']:.2f}\n"
+            msg += f"📊 Score: {opp['score']} | P/L: {opp['pl']}x | P/VP: {opp['pvp']}x\n"
+            msg += f"💰 DY: {opp['dy']}% | ROE: {opp['roe']}%\n"
+            msg += f"🎯 Suporte: R$ {opp['suporte']:.2f}\n"
+            msg += f"📍 Distância: {opp['distancia']:.1f}% {'acima' if opp['preco'] > opp['suporte'] else 'abaixo'}\n"
+            if opp.get('altman_z'):
+                msg += f"📊 Altman Z-Score: {opp['altman_z']:.2f}\n"
+            msg += f"⚡ {opp['classificacao']}\n\n"
+        msg += f"📌 <i>Top {len(oportunidades)} ações mais baratas</i>"
+    else:
+        msg += f"✅ Nenhuma oportunidade encontrada hoje."
+    enviar_telegram(msg)
+    return oportunidades
 
+# ============================================
+# SERVIDOR FLASK
+# ============================================
 from flask import Flask, jsonify
 app = Flask(__name__)
 
@@ -495,9 +571,10 @@ def ver_oportunidades():
     oportunidades = buscar_oportunidades()
     return jsonify({"total": len(oportunidades), "oportunidades": oportunidades})
 
+# ============================================
+# EXECUÇÃO PRINCIPAL
+# ============================================
 if __name__ == "__main__":
-    # Comentado para evitar duplicação com o cron-job.org
     # thread = threading.Thread(target=monitorar_continuo, daemon=True)
     # thread.start()
-    
     app.run(host='0.0.0.0', port=8080)
