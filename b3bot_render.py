@@ -570,9 +570,7 @@ def ver_oportunidades():
 # ============================================
 # EXECUÇÃO PRINCIPAL
 # ============================================
+from waitress import serve
+
 if __name__ == "__main__":
-    # Comentado para evitar duplicação com o cron-job.org
-    # thread = threading.Thread(target=monitorar_continuo, daemon=True)
-    # thread.start()
-    
-    app.run(host='0.0.0.0', port=8080)
+    serve(app, host='0.0.0.0', port=8080)
