@@ -7,6 +7,7 @@ import pytz
 import requests
 import os
 import json
+import pickle
 
 # ============================================
 # CONFIGURAÇÕES
@@ -18,10 +19,15 @@ TOP_OPORTUNIDADES = 10
 LIQUIDEZ_MINIMA = 1000000  # R$ 1 milhão
 
 # ============================================
+# HEALTHCHECKS.IO CONFIGURAÇÃO
+# ============================================
+HEALTHCHECKS_URL = "https://hc-ping.com/78fdfcdb-ec3e-4b92-adfb-ca523c553cc8"
+
+# ============================================
 # CACHE LOCAL
 # ============================================
 CACHE_FILE = "acoes_cache.json"
-CACHE_DURATION = 3600  # 1 hora
+CACHE_DURATION = 3600
 
 def carregar_cache():
     if os.path.exists(CACHE_FILE):
@@ -42,6 +48,36 @@ def salvar_cache(dados):
         print("  💾 Cache salvo")
     except:
         pass
+
+# ============================================
+# CACHE DE DADOS HISTÓRICOS (PREÇOS E VOLUMES)
+# ============================================
+CACHE_HISTORICO_FILE = "dados_historicos.pkl"
+CACHE_HISTORICO_DURATION = 21600  # 6 horas
+
+def carregar_dados_historicos(tickers_yf):
+    if os.path.exists(CACHE_HISTORICO_FILE):
+        mod_time = os.path.getmtime(CACHE_HISTORICO_FILE)
+        if time.time() - mod_time < CACHE_HISTORICO_DURATION:
+            print("  📦 Cache histórico encontrado (válido)")
+            try:
+                with open(CACHE_HISTORICO_FILE, 'rb') as f:
+                    dados = pickle.load(f)
+                    return dados
+            except:
+                pass
+    
+    print("  📡 Baixando dados históricos (pode levar alguns minutos)...")
+    dados = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=120)
+    
+    try:
+        with open(CACHE_HISTORICO_FILE, 'wb') as f:
+            pickle.dump(dados, f)
+        print("  💾 Histórico salvo em cache")
+    except:
+        pass
+    
+    return dados
 
 # ============================================
 # TELEGRAM
@@ -152,23 +188,19 @@ def calcular_proximo_suporte(dados_historicos, preco_atual, suporte_atual):
 # FUNDAMENTUS (FONTE PRINCIPAL PARA FUNDAMENTOS)
 # ============================================
 def extrair_valor_fundamentus(valor_str):
-    """Converte string do Fundamentus para float"""
     if pd.isna(valor_str) or valor_str == '-' or valor_str == '':
         return 0.0
     if isinstance(valor_str, (int, float)):
         return float(valor_str)
-    
     valor_str = str(valor_str).strip()
     if valor_str.endswith('%'):
         valor_str = valor_str[:-1]
-    
     if ',' in valor_str and '.' in valor_str:
         valor_str = valor_str.replace('.', '').replace(',', '.')
     elif ',' in valor_str:
         valor_str = valor_str.replace(',', '.')
     elif '.' in valor_str and len(valor_str.split('.')[-1]) != 2:
         valor_str = valor_str.replace('.', '')
-    
     try:
         return float(valor_str)
     except:
@@ -181,42 +213,45 @@ CACHE_FUNDAMENTUS_DURATION = 3600
 def buscar_dados_fundamentus():
     global cache_fundamentus, cache_fundamentus_timestamp
     agora = time.time()
-    
     if cache_fundamentus is not None and (agora - cache_fundamentus_timestamp) < CACHE_FUNDAMENTUS_DURATION:
         print("  📦 Fundamentus cacheado")
         return cache_fundamentus
-    
     try:
         url = "https://fundamentus.com.br/resultado.php"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.8,en-US;q=0.5,en;q=0.3',
+            'Connection': 'keep-alive',
+        }
         response = requests.get(url, headers=headers, timeout=30)
         dfs = pd.read_html(response.text)
-        
         df_fund = None
         for df in dfs:
             if 'Papel' in df.columns:
                 df_fund = df
                 break
-        
         if df_fund is None:
             print("  ⚠️ Tabela do Fundamentus não encontrada")
             return None
-        
         df_fund = df_fund.rename(columns={
             'Papel': 'ticker',
+            'Cotação': 'preco',
             'P/L': 'pl',
             'P/VP': 'pvp',
             'Div.Yield': 'dy',
             'ROE': 'roe',
             'Mrg. Líq.': 'margem',
+            'Liq.2meses': 'volume_financeiro',
             'Cres. Rec.5a': 'crescimento_receita'
         })
-        
+        df_fund['preco'] = df_fund['preco'].apply(extrair_valor_fundamentus)
+        df_fund['volume_financeiro'] = df_fund['volume_financeiro'].apply(extrair_valor_fundamentus)
+        df_fund = df_fund.dropna(subset=['preco', 'pl', 'pvp'])
         cache_fundamentus = df_fund
         cache_fundamentus_timestamp = agora
         print(f"  ✅ Fundamentus carregado: {len(df_fund)} ações")
         return df_fund
-        
     except Exception as e:
         print(f"  ❌ Erro ao carregar Fundamentus: {e}")
         return None
@@ -225,11 +260,9 @@ def buscar_fundamentos_acao(ticker, df_fund):
     try:
         if df_fund is None or df_fund.empty:
             return None
-        
         linha = df_fund[df_fund['ticker'].astype(str).str.upper() == ticker]
         if linha.empty:
             return None
-        
         return {
             'pl': extrair_valor_fundamentus(linha['pl'].iloc[0]),
             'pvp': extrair_valor_fundamentus(linha['pvp'].iloc[0]),
@@ -314,9 +347,7 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados, df_fund):
         if interest_expense and interest_expense > 0:
             cobertura_juros = ebit / interest_expense
         
-        # ============================================
-        # INDICADORES DO FUNDAMENTUS (NOVO)
-        # ============================================
+        # INDICADORES DO FUNDAMENTUS
         fundamentos = buscar_fundamentos_acao(ticker, df_fund)
         if fundamentos is None:
             return None
@@ -328,9 +359,7 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados, df_fund):
         margem = fundamentos['margem']
         revenue_growth = fundamentos['crescimento_receita']
         
-        # ============================================
         # FILTROS
-        # ============================================
         if pl < 2 or pl > 15:
             return None
         if pvp < 0.3 or pvp > 2:
@@ -352,9 +381,7 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados, df_fund):
         if dias_estoque is not None and dias_estoque > 180:
             return None
         
-        # ============================================
         # RANKING PONDERADO
-        # ============================================
         score_valuation = 0
         if pl < 8:
             score_valuation -= 4
@@ -407,9 +434,7 @@ def buscar_acao_completa(ticker, dados_historicos, cache_dados, df_fund):
             score_risco * 0.10
         ) * 10)
         
-        # ============================================
         # CLASSIFICAÇÃO
-        # ============================================
         suporte = tecnicos['suporte']
         distancia = tecnicos['dist_suporte']
         
@@ -484,10 +509,10 @@ def buscar_oportunidades():
     
     print(f"📊 Analisando {len(tickers)} ações...")
     tickers_yf = [f"{t}.SA" for t in tickers]
-    dados_historicos = yf.download(tickers_yf, period="1y", group_by='ticker', progress=False, timeout=60)
+    dados_historicos = carregar_dados_historicos(tickers_yf)
     
     if dados_historicos is None or dados_historicos.empty:
-        print("❌ Erro ao baixar dados históricos")
+        print("❌ Erro ao carregar dados históricos")
         return []
     
     todas_oportunidades = []
@@ -506,17 +531,15 @@ def buscar_oportunidades():
     return todas_oportunidades[:TOP_OPORTUNIDADES]
 
 # ============================================
-# URL DO HEALTHCHECKS.IO (COLOQUE A SUA URL AQUI)
-# ============================================
-HEALTHCHECKS_URL = "https://hc-ping.com/78fdfcdb-ec3e-4b92-adfb-ca523c553cc8"  # ← COLE SEU PING URL AQUI
-
-# ============================================
-# ENVIAR RESUMO DIÁRIO
+# ENVIAR RESUMO DIÁRIO (COM HEALTHCHECKS)
 # ============================================
 def enviar_resumo_diario():
     try:
-        # 🔔 Sinal de START (avisa o Healthchecks que começou)
-        requests.post(HEALTHCHECKS_URL + "/start", timeout=5)
+        # 🔔 Sinal de START para o Healthchecks
+        try:
+            requests.post(HEALTHCHECKS_URL + "/start", timeout=5)
+        except:
+            pass
         
         print("🚀 Servidor acordado. Aguardando 10 segundos para estabilizar...")
         time.sleep(10)
@@ -542,13 +565,16 @@ def enviar_resumo_diario():
         
         enviar_telegram(msg)
         
-        # ✅ Sinal de SUCESSO (avisa o Healthchecks que terminou)
-        requests.post(HEALTHCHECKS_URL, timeout=5)
+        # ✅ Sinal de SUCESSO para o Healthchecks
+        try:
+            requests.post(HEALTHCHECKS_URL, timeout=5)
+        except:
+            pass
         
         return oportunidades
         
     except Exception as e:
-        # ❌ Sinal de FALHA (avisa o Healthchecks que deu erro)
+        # ❌ Sinal de FALHA para o Healthchecks
         try:
             requests.post(HEALTHCHECKS_URL + "/fail", timeout=5)
         except:
@@ -557,7 +583,46 @@ def enviar_resumo_diario():
         raise
 
 # ============================================
+# MONITORAMENTO CONTÍNUO (DESATIVADO)
+# ============================================
+def monitorar_continuo():
+    fuso_sp = pytz.timezone('America/Sao_Paulo')
+    print(f"\n🤖 SCANNER B3 INICIADO")
+    print(f"⏰ Envio programado para às {HORARIO_ENVIO}:00\n")
+    while True:
+        now = datetime.now(fuso_sp)
+        if now.hour == HORARIO_ENVIO and now.minute < 5:
+            enviar_resumo_diario()
+            time.sleep(60)
+        time.sleep(30)
+
+# ============================================
+# SERVIDOR FLASK (APP GLOBAL - CRÍTICO PARA O RENDER)
+# ============================================
+from flask import Flask, jsonify
+app = Flask(__name__)
+
+@app.route('/')
+def health():
+    return "B3 Scanner Online", 200
+
+@app.route('/scan')
+def scan_manual():
+    oportunidades = enviar_resumo_diario()
+    return f"Scan OK. {len(oportunidades)} oportunidades.", 200
+
+@app.route('/oportunidades')
+def ver_oportunidades():
+    oportunidades = buscar_oportunidades()
+    return jsonify({"total": len(oportunidades), "oportunidades": oportunidades})
+
+# ============================================
 # EXECUÇÃO PRINCIPAL
 # ============================================
 if __name__ == "__main__":
+    # O agendamento é feito pelo Healthchecks.io
+    # O monitoramento contínuo está desativado
+    # thread = threading.Thread(target=monitorar_continuo, daemon=True)
+    # thread.start()
+    
     app.run(host='0.0.0.0', port=8080, threaded=True)
