@@ -506,66 +506,55 @@ def buscar_oportunidades():
     return todas_oportunidades[:TOP_OPORTUNIDADES]
 
 # ============================================
+# URL DO HEALTHCHECKS.IO (COLOQUE A SUA URL AQUI)
+# ============================================
+HEALTHCHECKS_URL = "https://hc-ping.com/78fdfcdb-ec3e-4b92-adfb-ca523c553cc8"  # ← COLE SEU PING URL AQUI
+
+# ============================================
 # ENVIAR RESUMO DIÁRIO
 # ============================================
 def enviar_resumo_diario():
-    print("🚀 Servidor acordado. Aguardando 10 segundos para estabilizar...")
-    time.sleep(10)
-    print("🟢 Continuando com o scan...")
-    
-    oportunidades = buscar_oportunidades()
-    msg = f"📊 <b>RESUMO DIÁRIO - {datetime.now().strftime('%d/%m/%Y')}</b>\n\n"
-    if oportunidades:
-        msg += f"🐋 <b>OPORTUNIDADES ({len(oportunidades)})</b>\n\n"
-        for i, opp in enumerate(oportunidades, 1):
-            msg += f"<b>{i}. {opp['ticker']}</b>\n"
-            msg += f"💰 Preço: R$ {opp['preco']:.2f}\n"
-            msg += f"📊 Score: {opp['score']} | P/L: {opp['pl']}x | P/VP: {opp['pvp']}x\n"
-            msg += f"💰 DY: {opp['dy']}% | ROE: {opp['roe']}%\n"
-            msg += f"🎯 Suporte: R$ {opp['suporte']:.2f}\n"
-            msg += f"📍 Distância: {opp['distancia']:.1f}% {'acima' if opp['preco'] > opp['suporte'] else 'abaixo'}\n"
-            if opp.get('altman_z'):
-                msg += f"📊 Altman Z-Score: {opp['altman_z']:.2f}\n"
-            msg += f"⚡ {opp['classificacao']}\n\n"
-        msg += f"📌 <i>Top {len(oportunidades)} ações mais baratas</i>"
-    else:
-        msg += f"✅ Nenhuma oportunidade encontrada hoje."
-    enviar_telegram(msg)
-    return oportunidades
-
-# ============================================
-# MONITORAMENTO CONTÍNUO (DESATIVADO)
-# ============================================
-def monitorar_continuo():
-    fuso_sp = pytz.timezone('America/Sao_Paulo')
-    print(f"\n🤖 SCANNER B3 INICIADO")
-    print(f"⏰ Envio programado para às {HORARIO_ENVIO}:00\n")
-    while True:
-        now = datetime.now(fuso_sp)
-        if now.hour == HORARIO_ENVIO and now.minute < 5:
-            enviar_resumo_diario()
-            time.sleep(60)
-        time.sleep(30)
-
-# ============================================
-# SERVIDOR FLASK
-# ============================================
-from flask import Flask, jsonify
-app = Flask(__name__)
-
-@app.route('/')
-def health():
-    return "B3 Scanner Online", 200
-
-@app.route('/scan')
-def scan_manual():
-    oportunidades = enviar_resumo_diario()
-    return f"Scan OK. {len(oportunidades)} oportunidades.", 200
-
-@app.route('/oportunidades')
-def ver_oportunidades():
-    oportunidades = buscar_oportunidades()
-    return jsonify({"total": len(oportunidades), "oportunidades": oportunidades})
+    try:
+        # 🔔 Sinal de START (avisa o Healthchecks que começou)
+        requests.post(HEALTHCHECKS_URL + "/start", timeout=5)
+        
+        print("🚀 Servidor acordado. Aguardando 10 segundos para estabilizar...")
+        time.sleep(10)
+        print("🟢 Continuando com o scan...")
+        
+        oportunidades = buscar_oportunidades()
+        msg = f"📊 <b>RESUMO DIÁRIO - {datetime.now().strftime('%d/%m/%Y')}</b>\n\n"
+        if oportunidades:
+            msg += f"🐋 <b>OPORTUNIDADES ({len(oportunidades)})</b>\n\n"
+            for i, opp in enumerate(oportunidades, 1):
+                msg += f"<b>{i}. {opp['ticker']}</b>\n"
+                msg += f"💰 Preço: R$ {opp['preco']:.2f}\n"
+                msg += f"📊 Score: {opp['score']} | P/L: {opp['pl']}x | P/VP: {opp['pvp']}x\n"
+                msg += f"💰 DY: {opp['dy']}% | ROE: {opp['roe']}%\n"
+                msg += f"🎯 Suporte: R$ {opp['suporte']:.2f}\n"
+                msg += f"📍 Distância: {opp['distancia']:.1f}% {'acima' if opp['preco'] > opp['suporte'] else 'abaixo'}\n"
+                if opp.get('altman_z'):
+                    msg += f"📊 Altman Z-Score: {opp['altman_z']:.2f}\n"
+                msg += f"⚡ {opp['classificacao']}\n\n"
+            msg += f"📌 <i>Top {len(oportunidades)} ações mais baratas</i>"
+        else:
+            msg += f"✅ Nenhuma oportunidade encontrada hoje."
+        
+        enviar_telegram(msg)
+        
+        # ✅ Sinal de SUCESSO (avisa o Healthchecks que terminou)
+        requests.post(HEALTHCHECKS_URL, timeout=5)
+        
+        return oportunidades
+        
+    except Exception as e:
+        # ❌ Sinal de FALHA (avisa o Healthchecks que deu erro)
+        try:
+            requests.post(HEALTHCHECKS_URL + "/fail", timeout=5)
+        except:
+            pass
+        print(f"❌ Erro: {e}")
+        raise
 
 # ============================================
 # EXECUÇÃO PRINCIPAL
