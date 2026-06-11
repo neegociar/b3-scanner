@@ -2,6 +2,6 @@ requests
 beautifulsoup4
 pandas
 flask
-waitress
+gunicorn
 pytz
 yfinance
